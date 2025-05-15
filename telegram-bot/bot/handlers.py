@@ -60,17 +60,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.delete()
         else:
             # Video 50 MB dan katta bo‘lsa, foydalanuvchiga xabar beriladi va siqiladi
-            await msg.edit_text("⚠️ Video hajmi 50 MB dan katta, sifat pasayishi mumkin. Siqib yuborilyapti...")
+            await msg.edit_text("⚠️ Fayl hajmi katta! Sifat pasayishi mumkin. Video siqilmoqda, kuting...")
             from bot.video_compress import compress_video
             compressed_path = video_path.replace('.mp4', '_compressed.mp4')
             try:
                 compress_video(video_path, compressed_path, target_size_mb=50)
+                await msg.edit_text("⏳ Video siqildi. Endi Telegramga yuklanmoqda...")
+                # Progress bilan yuklash
+                total_size = os.path.getsize(compressed_path)
+                chunk_size = 1024 * 1024 * 2  # 2 MB
+                sent = 0
+                last_percent = 0
                 with open(compressed_path, "rb") as video_file:
+                    while True:
+                        chunk = video_file.read(chunk_size)
+                        if not chunk:
+                            break
+                        sent += len(chunk)
+                        percent = int(sent * 100 / total_size)
+                        if percent > last_percent:
+                            try:
+                                await msg.edit_text(f"📤 Video yuklanmoqda: {percent}%")
+                            except Exception:
+                                pass
+                            last_percent = percent
+                    video_file.seek(0)
                     await update.message.reply_video(video_file)
                 os.remove(compressed_path)
                 await msg.edit_text("✅ Video siqildi va yuborildi.")
             except Exception as e:
-                await msg.edit_text(f"❌ Video siqishda xatolik: {e}")
+                await msg.edit_text(f"❌ Video siqishda yoki yuborishda xatolik: {e}")
             finally:
                 os.remove(video_path)
 
