@@ -20,7 +20,7 @@ def download_video(url: str, download_dir: str, progress_callback=None) -> str:
     cookies_path = os.path.join(os.path.dirname(__file__), 'cookies.txt')
     ydl_opts = {
         'outtmpl': output_path,
-        'format': 'mp4/bestvideo+bestaudio/best',
+        'format': 'best',
         'merge_output_format': 'mp4',
         'quiet': True,
         'noplaylist': True,
@@ -58,7 +58,7 @@ def download_video_with_info(url: str, download_dir: str, progress_callback=None
     cookies_path = os.path.join(os.path.dirname(__file__), 'cookies.txt')
     ydl_opts = {
         'outtmpl': output_path,
-        'format': 'mp4/bestvideo+bestaudio/best',
+        'format': 'best',
         'merge_output_format': 'mp4',
         'quiet': True,
         'noplaylist': True,
