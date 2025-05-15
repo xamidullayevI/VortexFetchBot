@@ -59,20 +59,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             os.remove(video_path)
             await msg.delete()
         else:
-            # Faylni transfer.sh ga yuklash
-            with open(video_path, 'rb') as f:
-                response = requests.put(
-                    f'https://transfer.sh/{os.path.basename(video_path)}',
-                    data=f
-                )
-            os.remove(video_path)
-            if response.status_code == 200:
-                download_link = response.text.strip()
-                await msg.edit_text(
-                    f"📥 Video fayli 50 MB dan katta bo'lgani uchun Telegram orqali yuborilmadi.\n\nYuklab olish uchun link: {download_link}"
-                )
-            else:
-                await msg.edit_text("❌ Video yuklashda xatolik yuz berdi (transfer.sh)")
+            # Video 50 MB dan katta bo‘lsa, foydalanuvchiga xabar beriladi va siqiladi
+            await msg.edit_text("⚠️ Video hajmi 50 MB dan katta, sifat pasayishi mumkin. Siqib yuborilyapti...")
+            from bot.video_compress import compress_video
+            compressed_path = video_path.replace('.mp4', '_compressed.mp4')
+            try:
+                compress_video(video_path, compressed_path, target_size_mb=50)
+                with open(compressed_path, "rb") as video_file:
+                    await update.message.reply_video(video_file)
+                os.remove(compressed_path)
+                await msg.edit_text("✅ Video siqildi va yuborildi.")
+            except Exception as e:
+                await msg.edit_text(f"❌ Video siqishda xatolik: {e}")
+            finally:
+                os.remove(video_path)
+
     except DownloadError as e:
         await msg.edit_text(f"❌ Error while downloading: {e}")
     except Exception as e:
