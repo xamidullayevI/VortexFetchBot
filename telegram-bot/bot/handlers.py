@@ -19,6 +19,8 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+import requests
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     urls = URL_REGEX.findall(text)
@@ -31,10 +33,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await update.message.reply_text("⏳ Fetching your video, please wait...")
     try:
         video_path = download_video(url, DOWNLOAD_DIR)
-        with open(video_path, "rb") as video_file:
-            await update.message.reply_video(video_file)
-        os.remove(video_path)
-        await msg.delete()
+        file_size = os.path.getsize(video_path)
+        max_telegram_size = 50 * 1024 * 1024  # 50 MB
+        if file_size <= max_telegram_size:
+            with open(video_path, "rb") as video_file:
+                await update.message.reply_video(video_file)
+            os.remove(video_path)
+            await msg.delete()
+        else:
+            # Faylni transfer.sh ga yuklash
+            with open(video_path, 'rb') as f:
+                response = requests.put(
+                    f'https://transfer.sh/{os.path.basename(video_path)}',
+                    data=f
+                )
+            os.remove(video_path)
+            if response.status_code == 200:
+                download_link = response.text.strip()
+                await msg.edit_text(
+                    f"📥 Video fayli 50 MB dan katta bo'lgani uchun Telegram orqali yuborilmadi.\n\nYuklab olish uchun link: {download_link}"
+                )
+            else:
+                await msg.edit_text("❌ Video yuklashda xatolik yuz berdi (transfer.sh)")
     except DownloadError as e:
         await msg.edit_text(f"❌ Error while downloading: {e}")
     except Exception as e:
