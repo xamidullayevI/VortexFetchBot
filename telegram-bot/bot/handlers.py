@@ -32,7 +32,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = urls[0]
     msg = await update.message.reply_text("⏳ Fetching your video, please wait...")
     try:
-        video_path = download_video(url, DOWNLOAD_DIR)
+        last_percent = {'value': 0}
+        async def update_progress(percent):
+            try:
+                await msg.edit_text(f"⏳ Video yuklanmoqda: {percent}%")
+            except Exception:
+                pass
+        def progress_hook(d):
+            if d['status'] == 'downloading':
+                percent_str = d.get('_percent_str', '0.0%').replace('%','').strip()
+                try:
+                    percent = int(float(percent_str))
+                except ValueError:
+                    percent = 0
+                if percent >= last_percent['value'] + 5:
+                    # asyncio.create_task bilan chaqirish uchun
+                    import asyncio
+                    asyncio.create_task(update_progress(percent))
+                    last_percent['value'] = percent
+        video_path = download_video(url, DOWNLOAD_DIR, progress_callback=progress_hook)
         file_size = os.path.getsize(video_path)
         max_telegram_size = 50 * 1024 * 1024  # 50 MB
         if file_size <= max_telegram_size:
@@ -58,4 +76,4 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except DownloadError as e:
         await msg.edit_text(f"❌ Error while downloading: {e}")
     except Exception as e:
-        await msg.edit_text("❌ An unexpected error occurred.")
+        await msg.edit_text(f"❌ An unexpected error occurred: {e}")

@@ -5,7 +5,7 @@ import uuid
 class DownloadError(Exception):
     pass
 
-def download_video(url: str, download_dir: str) -> str:
+def download_video(url: str, download_dir: str, progress_callback=None) -> str:
     """
     Downloads video from the given URL using yt-dlp.
     Supports restricted videos by using cookies.json if present.
@@ -24,7 +24,7 @@ def download_video(url: str, download_dir: str) -> str:
         'merge_output_format': 'mp4',
         'quiet': True,
         'noplaylist': True,
-        'progress_hooks': [],
+        'progress_hooks': [progress_callback] if progress_callback else [],
     }
     if os.path.exists(cookies_path):
         ydl_opts['cookiefile'] = cookies_path
