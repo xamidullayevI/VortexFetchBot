@@ -30,7 +30,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     url = urls[0]
-    msg = await update.message.reply_text("⏳ Fetching your video, please wait...")
+    msg = await update.message.reply_text("⏳ Video yoki rasm yuklanmoqda. Iltimos, kuting...")
     try:
         last_percent = {'value': 0}
         async def update_progress(percent):
@@ -136,7 +136,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await update.message.reply_video(video_file, caption=caption)
                 await msg.edit_text("✅ Video siqildi va yuborildi.")
         except Exception as e:
-            await msg.edit_text(f"❌ Video jarayonida xatolik: {e}")
+            err_msg = str(e)
+            if 'There is no video in this post' in err_msg:
+                await msg.edit_text("❗ Bu postda video yo‘q. Ehtimol, rasmli post bo‘lishi mumkin. Rasmli postlar uchun rasm yuklash qo‘llab-quvvatlanadi yoki boshqa link yuboring.")
+            else:
+                await msg.edit_text(f"❌ Video jarayonida xatolik: {e}")
         finally:
             # Har doim vaqtinchalik fayllarni tozalash
             for f in [video_path, compressed_path]:
