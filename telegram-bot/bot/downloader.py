@@ -16,8 +16,8 @@ def download_video(url: str, download_dir: str) -> str:
         os.makedirs(download_dir)
     filename = f"video_{uuid.uuid4().hex}.mp4"
     output_path = os.path.join(download_dir, filename)
-    # Check for cookies.json in the same directory as this file
-    cookies_path = os.path.join(os.path.dirname(__file__), 'cookies.json')
+    # Check for cookies.txt (Netscape format) in the same directory as this file
+    cookies_path = os.path.join(os.path.dirname(__file__), 'cookies.txt')
     ydl_opts = {
         'outtmpl': output_path,
         'format': 'mp4/bestvideo+bestaudio/best',
