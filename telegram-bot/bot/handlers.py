@@ -147,7 +147,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     og_image = soup.find('meta', property='og:image')
                     image_url = og_image['content'] if og_image else None
                     if image_url:
-                        img_resp = requests.get(image_url)
+                        # Try to get higher resolution by replacing size in URL
+                        highres_url = image_url.replace('s150x150', 's1080x1080').replace('p150x150', 'p1080x1080')
+                        img_resp = requests.get(highres_url)
                         from io import BytesIO
                         img_bytes = BytesIO(img_resp.content)
                         img_bytes.name = 'instagram.jpg'
