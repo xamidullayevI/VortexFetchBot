@@ -45,3 +45,40 @@ def download_video(url: str, download_dir: str, progress_callback=None) -> str:
         raise DownloadError(error_msg)
     except Exception as e:
         raise DownloadError(str(e))
+
+
+def download_video_with_info(url: str, download_dir: str, progress_callback=None):
+    """
+    Yuklab olingan video path va info dict (yt-dlp metadata) ni qaytaradi.
+    """
+    if not os.path.exists(download_dir):
+        os.makedirs(download_dir)
+    filename = f"video_{uuid.uuid4().hex}.mp4"
+    output_path = os.path.join(download_dir, filename)
+    cookies_path = os.path.join(os.path.dirname(__file__), 'cookies.txt')
+    ydl_opts = {
+        'outtmpl': output_path,
+        'format': 'mp4/bestvideo+bestaudio/best',
+        'merge_output_format': 'mp4',
+        'quiet': True,
+        'noplaylist': True,
+        'progress_hooks': [progress_callback] if progress_callback else [],
+    }
+    if os.path.exists(cookies_path):
+        ydl_opts['cookiefile'] = cookies_path
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+        if 'requested_downloads' in info and info['requested_downloads']:
+            output_path = info['requested_downloads'][0]['filepath']
+        elif 'filepath' in info:
+            output_path = info['filepath']
+        return output_path, info
+    except yt_dlp.utils.DownloadError as e:
+        error_msg = str(e)
+        if 'cookies' in error_msg.lower() or 'sign in' in error_msg.lower():
+            if not os.path.exists(cookies_path):
+                raise DownloadError("This video requires authentication. Please provide a valid cookies.json file in the bot directory. See README for details.")
+        raise DownloadError(error_msg)
+    except Exception as e:
+        raise DownloadError(str(e))

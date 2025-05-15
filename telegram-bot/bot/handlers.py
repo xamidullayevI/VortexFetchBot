@@ -55,10 +55,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         video_path = os.path.join(DOWNLOAD_DIR, f"video_{unique_id}.mp4")
         compressed_path = os.path.join(DOWNLOAD_DIR, f"video_{unique_id}_compressed.mp4")
         try:
-            video_path = download_video(url, DOWNLOAD_DIR, progress_callback=progress_hook)
+            # Video va info ni qaytaradigan yangi funksiya ishlatiladi
+            from bot.downloader import download_video_with_info
+            video_path, video_info = download_video_with_info(url, DOWNLOAD_DIR, progress_callback=progress_hook)
             file_size = os.path.getsize(video_path)
             max_telegram_size = 50 * 1024 * 1024  # 50 MB
-            # Tarmoq nomini aniqlash
             def get_network_name(url):
                 if 'instagram.com' in url:
                     return 'Instagram'
@@ -75,9 +76,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     return 'Video'
             network_name = get_network_name(url)
-            # Haqiqiy video nomini ajratib olish (fayl nomi, kengaytmasiz)
-            video_filename = os.path.splitext(os.path.basename(video_path))[0]
-            caption = f"{network_name}: {video_filename}"
+            # Video sarlavhasi (ijtimoiy tarmoqdagi nomi)
+            video_title = video_info.get('title') or os.path.splitext(os.path.basename(video_path))[0]
+            caption = f"{network_name}: {video_title}"
             if file_size <= max_telegram_size:
                 with open(video_path, "rb") as video_file:
                     await update.message.reply_video(video_file, caption=caption)
