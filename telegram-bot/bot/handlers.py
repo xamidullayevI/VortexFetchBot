@@ -73,6 +73,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return 'Twitter'
                 elif 'vk.com' in url:
                     return 'VK'
+                elif 'reddit.com' in url:
+                    return 'Reddit'
+                elif 'vimeo.com' in url:
+                    return 'Vimeo'
+                elif 'dailymotion.com' in url:
+                    return 'Dailymotion'
+                elif 'likee.video' in url:
+                    return 'Likee'
+                elif 'pinterest.com' in url:
+                    return 'Pinterest'
                 else:
                     return 'Video'
             network_name = get_network_name(url)
@@ -80,8 +90,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             video_title = video_info.get('title') or os.path.splitext(os.path.basename(video_path))[0]
             caption = f"{network_name}: {video_title}"
             if file_size <= max_telegram_size:
-                with open(video_path, "rb") as video_file:
-                    await update.message.reply_video(video_file, caption=caption)
+                ext = os.path.splitext(video_path)[1].lower()
+                image_exts = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
+                with open(video_path, "rb") as file:
+                    if ext in image_exts:
+                        await update.message.reply_photo(file, caption=caption)
+                    else:
+                        await update.message.reply_video(file, caption=caption)
                 await msg.delete()
             else:
                 # Video 50 MB dan katta bo‘lsa, foydalanuvchiga xabar beriladi va siqiladi
@@ -113,7 +128,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 pass
                             last_percent = percent
                     video_file.seek(0)
-                    await update.message.reply_video(video_file, caption=caption)
+                    ext = os.path.splitext(compressed_path)[1].lower()
+                    image_exts = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
+                    if ext in image_exts:
+                        await update.message.reply_photo(video_file, caption=caption)
+                    else:
+                        await update.message.reply_video(video_file, caption=caption)
                 await msg.edit_text("✅ Video siqildi va yuborildi.")
         except Exception as e:
             await msg.edit_text(f"❌ Video jarayonida xatolik: {e}")
