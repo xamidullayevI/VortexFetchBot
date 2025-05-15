@@ -138,7 +138,25 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             err_msg = str(e)
             if 'There is no video in this post' in err_msg:
-                await msg.edit_text("❗ Bu postda video yo‘q. Ehtimol, rasmli post bo‘lishi mumkin. Rasmli postlar uchun rasm yuklash qo‘llab-quvvatlanadi yoki boshqa link yuboring.")
+                # Instagram rasmli post uchun fallback
+                try:
+                    import requests
+                    from bs4 import BeautifulSoup
+                    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+                    soup = BeautifulSoup(resp.text, 'html.parser')
+                    og_image = soup.find('meta', property='og:image')
+                    image_url = og_image['content'] if og_image else None
+                    if image_url:
+                        img_resp = requests.get(image_url)
+                        from io import BytesIO
+                        img_bytes = BytesIO(img_resp.content)
+                        img_bytes.name = 'instagram.jpg'
+                        await update.message.reply_photo(img_bytes, caption="Instagram: Rasmli post")
+                        await msg.delete()
+                    else:
+                        await msg.edit_text("❗ Bu postda video ham, rasm ham topilmadi.")
+                except Exception as ex:
+                    await msg.edit_text(f"❗ Video va rasm yuklanmadi: {ex}")
             else:
                 await msg.edit_text(f"❌ Video jarayonida xatolik: {e}")
         finally:
