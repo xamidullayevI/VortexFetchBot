@@ -50,24 +50,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     import asyncio
                     asyncio.create_task(update_progress(percent))
                     last_percent['value'] = percent
-        video_path = download_video(url, DOWNLOAD_DIR, progress_callback=progress_hook)
-        file_size = os.path.getsize(video_path)
-        max_telegram_size = 50 * 1024 * 1024  # 50 MB
-        if file_size <= max_telegram_size:
-            with open(video_path, "rb") as video_file:
-                await update.message.reply_video(video_file)
-            os.remove(video_path)
-            await msg.delete()
-        else:
-            # Video 50 MB dan katta bo‘lsa, foydalanuvchiga xabar beriladi va siqiladi
-            await msg.edit_text("⚠️ Fayl hajmi katta! Sifat pasayishi mumkin. Video siqilmoqda, kuting...")
-            from bot.video_compress import compress_video
-            compressed_path = video_path.replace('.mp4', '_compressed.mp4')
-            try:
+        import uuid
+        unique_id = str(uuid.uuid4())
+        video_path = os.path.join(DOWNLOAD_DIR, f"video_{unique_id}.mp4")
+        compressed_path = os.path.join(DOWNLOAD_DIR, f"video_{unique_id}_compressed.mp4")
+        try:
+            video_path = download_video(url, DOWNLOAD_DIR, progress_callback=progress_hook, output_path=video_path)
+            file_size = os.path.getsize(video_path)
+            max_telegram_size = 50 * 1024 * 1024  # 50 MB
+            if file_size <= max_telegram_size:
+                with open(video_path, "rb") as video_file:
+                    await update.message.reply_video(video_file)
+                await msg.delete()
+            else:
+                # Video 50 MB dan katta bo‘lsa, foydalanuvchiga xabar beriladi va siqiladi
+                await msg.edit_text("⚠️ Fayl hajmi katta! Sifat pasayishi mumkin. Video siqilmoqda, kuting...")
+                from bot.video_compress import compress_video
                 compress_video(video_path, compressed_path, target_size_mb=50)
+                # Siqilgan fayl hajmini tekshirish
+                compressed_size = os.path.getsize(compressed_path)
+                if compressed_size > max_telegram_size:
+                    await msg.edit_text("❌ Siqilgan video ham 50 MB dan katta. Yuborib bo‘lmaydi.")
+                    return
                 await msg.edit_text("⏳ Video siqildi. Endi Telegramga yuklanmoqda...")
                 # Progress bilan yuklash
-                total_size = os.path.getsize(compressed_path)
+                total_size = compressed_size
                 chunk_size = 1024 * 1024 * 2  # 2 MB
                 sent = 0
                 last_percent = 0
@@ -86,12 +93,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             last_percent = percent
                     video_file.seek(0)
                     await update.message.reply_video(video_file)
-                os.remove(compressed_path)
                 await msg.edit_text("✅ Video siqildi va yuborildi.")
-            except Exception as e:
-                await msg.edit_text(f"❌ Video siqishda yoki yuborishda xatolik: {e}")
-            finally:
-                os.remove(video_path)
+        except Exception as e:
+            await msg.edit_text(f"❌ Video jarayonida xatolik: {e}")
+        finally:
+            # Har doim vaqtinchalik fayllarni tozalash
+            for f in [video_path, compressed_path]:
+                try:
+                    if os.path.exists(f):
+                        os.remove(f)
+                except Exception:
+                    pass
 
     except DownloadError as e:
         await msg.edit_text(f"❌ Error while downloading: {e}")
