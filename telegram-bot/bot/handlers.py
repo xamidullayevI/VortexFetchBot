@@ -55,12 +55,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         video_path = os.path.join(DOWNLOAD_DIR, f"video_{unique_id}.mp4")
         compressed_path = os.path.join(DOWNLOAD_DIR, f"video_{unique_id}_compressed.mp4")
         try:
-            video_path = download_video(url, DOWNLOAD_DIR, progress_callback=progress_hook, output_path=video_path)
+            video_path = download_video(url, DOWNLOAD_DIR, progress_callback=progress_hook)
             file_size = os.path.getsize(video_path)
             max_telegram_size = 50 * 1024 * 1024  # 50 MB
+            # Tarmoq nomini aniqlash
+            def get_network_name(url):
+                if 'instagram.com' in url:
+                    return 'Instagram'
+                elif 'youtube.com' in url or 'youtu.be' in url:
+                    return 'YouTube'
+                elif 'tiktok.com' in url:
+                    return 'TikTok'
+                elif 'facebook.com' in url:
+                    return 'Facebook'
+                elif 'twitter.com' in url or 'x.com' in url:
+                    return 'Twitter'
+                elif 'vk.com' in url:
+                    return 'VK'
+                else:
+                    return 'Video'
+            network_name = get_network_name(url)
+            # Haqiqiy video nomini ajratib olish (fayl nomi, kengaytmasiz)
+            video_filename = os.path.splitext(os.path.basename(video_path))[0]
+            caption = f"{network_name}: {video_filename}"
             if file_size <= max_telegram_size:
                 with open(video_path, "rb") as video_file:
-                    await update.message.reply_video(video_file)
+                    await update.message.reply_video(video_file, caption=caption)
                 await msg.delete()
             else:
                 # Video 50 MB dan katta bo‘lsa, foydalanuvchiga xabar beriladi va siqiladi
@@ -92,7 +112,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                 pass
                             last_percent = percent
                     video_file.seek(0)
-                    await update.message.reply_video(video_file)
+                    await update.message.reply_video(video_file, caption=caption)
                 await msg.edit_text("✅ Video siqildi va yuborildi.")
         except Exception as e:
             await msg.edit_text(f"❌ Video jarayonida xatolik: {e}")
