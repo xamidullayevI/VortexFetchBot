@@ -47,7 +47,7 @@ def download_video(url: str, download_dir: str, progress_callback=None) -> str:
         raise DownloadError(str(e))
 
 
-def download_video_with_info(url: str, download_dir: str, progress_callback=None):
+def download_video_with_info(url: str, download_dir: str):
     """
     Yuklab olingan video path va info dict (yt-dlp metadata) ni qaytaradi.
     """
@@ -62,7 +62,6 @@ def download_video_with_info(url: str, download_dir: str, progress_callback=None
         'merge_output_format': 'mp4',
         'quiet': True,
         'noplaylist': True,
-        'progress_hooks': [progress_callback] if progress_callback else [],
     }
     if os.path.exists(cookies_path):
         ydl_opts['cookiefile'] = cookies_path
