@@ -89,52 +89,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Video sarlavhasi (ijtimoiy tarmoqdagi nomi)
             video_title = video_info.get('title') or os.path.splitext(os.path.basename(video_path))[0]
             caption = f"{network_name}: {video_title}"
+            ext = os.path.splitext(video_path)[1].lower()
+            image_exts = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
             if file_size <= max_telegram_size:
-                ext = os.path.splitext(video_path)[1].lower()
-                image_exts = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
                 with open(video_path, "rb") as file:
                     if ext in image_exts:
                         await update.message.reply_photo(file, caption=caption)
                     else:
                         await update.message.reply_video(file, caption=caption)
                 await msg.delete()
+            elif file_size <= 2 * 1024 * 1024 * 1024:  # 2 GB
+                with open(video_path, "rb") as file:
+                    if ext in image_exts:
+                        await update.message.reply_photo(file, caption=caption)
+                    else:
+                        await update.message.reply_document(file, caption=caption)
+                await msg.delete()
             else:
-                # Video 50 MB dan katta bo‘lsa, foydalanuvchiga xabar beriladi va siqiladi
-                await msg.edit_text("⚠️ Fayl hajmi katta! Sifat pasayishi mumkin. Video siqilmoqda, kuting...")
+                # Video 2 GB dan katta bo‘lsa, siqiladi
+                await msg.edit_text("⚠️ Fayl 2 GB dan katta! Video siqilmoqda, kuting...")
                 from bot.video_compress import compress_video
-                compress_video(video_path, compressed_path, target_size_mb=50)
-                # Siqilgan fayl hajmini tekshirish
+                compress_video(video_path, compressed_path, target_size_mb=2000)  # 2 GB limit uchun
                 compressed_size = os.path.getsize(compressed_path)
-                if compressed_size > max_telegram_size:
-                    await msg.edit_text("❌ Siqilgan video ham 50 MB dan katta. Yuborib bo‘lmaydi.")
+                if compressed_size > 2 * 1024 * 1024 * 1024:
+                    await msg.edit_text("❌ Siqilgan video ham 2 GB dan katta. Yuborib bo‘lmaydi.")
                     return
                 await msg.edit_text("⏳ Video siqildi. Endi Telegramga yuklanmoqda...")
-                # Progress bilan yuklash
-                total_size = compressed_size
-                chunk_size = 1024 * 1024 * 2  # 2 MB
-                sent = 0
-                last_percent = 0
-                with open(compressed_path, "rb") as video_file:
-                    while True:
-                        chunk = video_file.read(chunk_size)
-                        if not chunk:
-                            break
-                        sent += len(chunk)
-                        percent = int(sent * 100 / total_size)
-                        if percent > last_percent:
-                            try:
-                                await msg.edit_text(f"📤 Video yuklanmoqda: {percent}%")
-                            except Exception:
-                                pass
-                            last_percent = percent
-                    video_file.seek(0)
-                    ext = os.path.splitext(compressed_path)[1].lower()
-                    image_exts = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
-                    if ext in image_exts:
-                        await update.message.reply_photo(video_file, caption=caption)
-                    else:
-                        await update.message.reply_video(video_file, caption=caption)
-                await msg.edit_text("✅ Video siqildi va yuborildi.")
+                with open(compressed_path, "rb") as file:
+                    await update.message.reply_document(file, caption=caption)
+                await msg.delete()
+
         except Exception as e:
             err_msg = str(e)
             if 'There is no video in this post' in err_msg:
