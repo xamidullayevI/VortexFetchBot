@@ -30,26 +30,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     url = urls[0]
-    msg = await update.message.reply_text("⏳ Video yoki rasm yuklanmoqda. Iltimos, kuting...")
+    msg = await update.message.reply_text("⏳ Fayl yuklanmoqda. Iltimos, kuting...")
     try:
-        last_percent = {'value': 0}
-        async def update_progress(percent):
-            try:
-                await msg.edit_text(f"⏳ Video yuklanmoqda: {percent}%")
-            except Exception:
-                pass
-        def progress_hook(d):
-            if d['status'] == 'downloading':
-                percent_str = d.get('_percent_str', '0.0%').replace('%','').strip()
-                try:
-                    percent = int(float(percent_str))
-                except ValueError:
-                    percent = 0
-                if percent >= last_percent['value'] + 5:
-                    # asyncio.create_task bilan chaqirish uchun
-                    import asyncio
-                    asyncio.create_task(update_progress(percent))
-                    last_percent['value'] = percent
+
         import uuid
         unique_id = str(uuid.uuid4())
         video_path = os.path.join(DOWNLOAD_DIR, f"video_{unique_id}.mp4")
