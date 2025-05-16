@@ -40,7 +40,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             # Video va info ni qaytaradigan yangi funksiya ishlatiladi
             from bot.downloader import download_video_with_info
-            video_path, video_info = download_video_with_info(url, DOWNLOAD_DIR, progress_callback=progress_hook)
+            video_path, video_info = download_video_with_info(url, DOWNLOAD_DIR)
             file_size = os.path.getsize(video_path)
             max_telegram_size = 50 * 1024 * 1024  # 50 MB
             def get_network_name(url):
