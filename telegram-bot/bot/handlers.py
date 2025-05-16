@@ -1,8 +1,10 @@
-from telegram import Update
-from telegram.ext import ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes, CallbackQueryHandler
 from bot.downloader import download_video, DownloadError
 import os
 import re
+import subprocess
+from pathlib import Path
 
 DOWNLOAD_DIR = "downloads"
 
@@ -15,9 +17,79 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "ℹ️ *How to use VortexFetchBot:*\n1. Send a video link from any major social network.\n2. Wait a moment while I fetch and send you the video.\n\n_If you encounter any issues, make sure the link is correct and the video is public._",
+        "ℹ️ *How to use VortexFetchBot:*\n1. Send a video link from any major social network.\n2. Wait a moment while I fetch and send you the video.\n3. Use the audio button to extract audio from videos.\n\n_If you encounter any issues, make sure the link is correct and the video is public._",
         parse_mode="Markdown"
     )
+
+async def extract_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    # Callback data formatini tekshirish
+    if not query.data.startswith("get_audio:"):
+        return
+    
+    unique_id = query.data.split(":")[1]
+    await query.message.reply_text("⏳ Audio ajratilmoqda, iltimos kuting...")
+    
+    try:
+        # Video faylini yuklab olish
+        video_path = os.path.join(DOWNLOAD_DIR, f"video_{unique_id}.mp4")
+        audio_path = os.path.join(DOWNLOAD_DIR, f"audio_{unique_id}.mp3")
+        
+        # Agar video fayli mavjud bo'lmasa, .part faylini ham tekshiramiz
+        if not os.path.exists(video_path):
+            part_path = video_path + ".part"
+            if os.path.exists(part_path):
+                await query.message.reply_text("❗ Video hali to‘liq yuklab olinmagan. Iltimos, biroz kuting va keyinroq urinib ko‘ring.")
+                return
+            # Vaqtinchalik video faylini yaratish
+            original_message = query.message
+            if original_message.video:
+                video_file = await original_message.video.get_file()
+                await video_file.download_to_drive(video_path)
+            else:
+                await query.message.reply_text("❌ Video topilmadi. Iltimos, qayta urinib ko'ring.")
+                return
+        
+        # FFmpeg orqali videoni audioga aylantirish
+        try:
+            print(f"[DEBUG] ffmpeg command: ffmpeg -i {video_path} -q:a 0 -map a {audio_path}")
+            ffmpeg_result = subprocess.run(
+                ["ffmpeg", "-i", video_path, "-q:a", "0", "-map", "a", audio_path],
+                capture_output=True
+            )
+            print(f"[DEBUG] ffmpeg returncode: {ffmpeg_result.returncode}")
+            if ffmpeg_result.returncode != 0:
+                await query.message.reply_text(f"❌ Audio ajratishda xatolik: {ffmpeg_result.stderr.decode()}")
+                print(f"[DEBUG] ffmpeg stderr: {ffmpeg_result.stderr.decode()}")
+                return
+            if not os.path.exists(audio_path):
+                await query.message.reply_text("❌ Audio fayli yaratilmagan. Ehtimol, videoda audio trek mavjud emas yoki ffmpeg noto‘g‘ri ishladi.")
+                print(f"[DEBUG] Audio fayli mavjud emas: {audio_path}")
+                return
+            print(f"[DEBUG] Audio fayli yaratildi: {audio_path}")
+            # Audio faylini yuborish
+            with open(audio_path, "rb") as audio_file:
+                await query.message.reply_audio(
+                    audio_file,
+                    title=f"Audio - {Path(video_path).stem}",
+                    caption="🎵 Videoning audio versiyasi"
+                )
+        except subprocess.CalledProcessError as e:
+            await query.message.reply_text(f"❌ Audio ajratishda xatolik: {e.stderr.decode()}")
+        except Exception as e:
+            await query.message.reply_text(f"❌ Audio ajratishda xatolik: {e}")
+    except Exception as e:
+        await query.message.reply_text(f"❌ Kutilmagan xatolik: {e}")
+    finally:
+        # Vaqtinchalik fayllarni tozalash
+        for f in [video_path, audio_path]:
+            try:
+                if os.path.exists(f):
+                    os.remove(f)
+            except Exception:
+                pass
 
 import requests
 
@@ -42,7 +114,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             from bot.downloader import download_video_with_info
             video_path, video_info = download_video_with_info(url, DOWNLOAD_DIR)
             file_size = os.path.getsize(video_path)
-            max_telegram_size = 50 * 1024 * 1024  # 50 MB
+            max_telegram_size = 2 * 1024 * 1024 * 1024  # 2 GB (Telegram max file size)
             def get_network_name(url):
                 if 'instagram.com' in url:
                     return 'Instagram'
@@ -79,7 +151,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if ext in image_exts:
                         await update.message.reply_photo(file, caption=caption)
                     else:
-                        await update.message.reply_video(file, caption=caption)
+                        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                        audio_button = InlineKeyboardMarkup([
+                            [InlineKeyboardButton(text="🎵 Audio yuklab olish", callback_data=f"get_audio:{unique_id}")]
+                        ])
+                        await update.message.reply_video(file, caption=caption, reply_markup=audio_button)
                 await msg.delete()
             elif file_size <= 2 * 1024 * 1024 * 1024:  # 2 GB
                 with open(video_path, "rb") as file:
@@ -95,7 +171,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 compress_video(video_path, compressed_path, target_size_mb=2000)  # 2 GB limit uchun
                 compressed_size = os.path.getsize(compressed_path)
                 if compressed_size > 2 * 1024 * 1024 * 1024:
-                    await msg.edit_text("❌ Siqilgan video ham 2 GB dan katta. Yuborib bo‘lmaydi.")
+                    # Fayl hamon katta bo‘lsa, foydalanuvchiga link orqali yuklab olishni taklif qilish
+                    await msg.edit_text("❌ Siqilgan video ham 2 GB dan katta. Telegram orqali yuborib bo‘lmaydi. Faylni tashqi hostingga yuklab, link yuborilmoqda...")
+                    try:
+                        import requests
+                        with open(compressed_path, 'rb') as f:
+                            resp = requests.put('https://transfer.sh/video.mp4', data=f)
+                        if resp.status_code == 200:
+                            await msg.edit_text(f"🔗 Faylni bu link orqali yuklab olishingiz mumkin: {resp.text.strip()}")
+                        else:
+                            await msg.edit_text("❌ Faylni tashqi hostingga yuklab bo‘lmadi. Iltimos, kichikroq video yuboring.")
+                    except Exception as e:
+                        await msg.edit_text(f"❌ Faylni tashqi hostingga yuklashda xatolik: {e}")
                     return
                 await msg.edit_text("⏳ Video siqildi. Endi Telegramga yuklanmoqda...")
                 with open(compressed_path, "rb") as file:
