@@ -12,7 +12,7 @@ URL_REGEX = re.compile(r"https?://[\w./?=&%-]+", re.IGNORECASE)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Welcome to VortexFetchBot!\nJust send me a video link from YouTube, Instagram, TikTok, or other social platforms, and I will fetch the video for you."
+        "👋 o to VortexFetchBot!\nJust send me a video link from YouTube, Instagram, TikTok, or other social platforms, and I will fetch the video for you."
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -111,7 +111,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # LOG: universal_download orqali yuklash usuli va audio_url ni logga yozamiz
         from bot.utils import universal_download
         result = universal_download(url)
-        # Xatoliklar uchun aniq va tushunarli xabar
         if not result or result.get('error'):
             error_message = result.get('error_message', '❗ Media topilmadi yoki yuklab bo‘lmadi.') if result else '❗ Media topilmadi yoki yuklab bo‘lmadi.'
             await msg.edit_text(error_message)

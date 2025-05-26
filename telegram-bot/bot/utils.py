@@ -1,93 +1,37 @@
 import re
 import os
-import requests
-
-def download_with_fastsaver(url):
-    """
-    FastSaver API orqali universal media (video, rasm, audio) yuklash.
-    Instagram, TikTok, Facebook, Twitter, Pinterest, Threads, Snapchat, Likee va boshqalar uchun.
-    """
-    api_key = os.getenv("FASTSAVER_API_KEY")
-    if not api_key:
-        print("[ERROR] FASTSAVER_API_KEY environment variable topilmadi!")
-        return {
-            "error": True,
-            "error_message": "FastSaver API token topilmadi. Railway yoki .env faylga FASTSAVER_API_KEY ni to‘g‘ri yozing!"
-        }
-    api_url = "https://fastsaverapi.com/api/get-info"
-    params = {"url": url, "token": api_key}
-    try:
-        response = requests.get(api_url, params=params, timeout=20)
-        try:
-            data = response.json()
-        except Exception:
-            print(f"[ERROR] FastSaver API javobi JSON formatda emas: {response.text}")
-            return {
-                "error": True,
-                "error_message": f"FastSaver API javobi JSON formatda emas: {response.text}"
-            }
-        print(f"[LOG] FastSaver API javobi: {data}")
-        # API xatoliklari uchun aniq xabar
-        if 'detail' in data and data['detail'] == 'Not found':
-            return {
-                "error": True,
-                "error_message": "FastSaver API: 'Not found'. Token yoki endpoint xato yoki noto‘g‘ri URL yuborildi."
-            }
-        if data.get('error') or not data.get('download_url'):
-            return {
-                "error": True,
-                "error_message": f"FastSaver API xatolik yoki media topilmadi: {data}"
-            }
-        download_url = data.get("download_url")
-        audio_url = data.get("audio_url") or data.get("music_url")
-        media_type = data.get("type")
-        thumb = data.get("thumb")
-        return {
-            "download_url": download_url,
-            "audio_url": audio_url,
-            "media_type": media_type,
-            "thumb": thumb,
-            "info": data,
-            "error": False
-        }
-    except Exception as e:
-        print(f"[ERROR] FastSaver API xatolik: {e}")
-        return {
-            "error": True,
-            "error_message": f"FastSaver API so‘rovda xatolik: {e}"
-        }
 
 
-
-# Fallback uchun yt-dlp funksiyasi (mavjud bo'lsa, chaqiriladi)
-def download_with_ytdlp(url):
-    # Agar FastSaver ishlamasa, fallback sifatida ishlatiladi
-    print("[LOG] yt-dlp orqali yuklash ishladi")
-    return None  # yoki haqiqiy link va audio qaytarilsa shu yerga yozing
-
-# Universal yuklab olish funksiyasi
-def universal_download(url):
-    """
-    Universal yuklab olish: avval FastSaver, keyin fallback yt-dlp.
-    Har doim dict qaytaradi: {download_url, audio_url, media_type, thumb, info, method, error, error_message}
-    """
-    fastsaver_result = download_with_fastsaver(url)
-    # Fastsaver natijasida error yoki download_url yo‘q bo‘lsa, fallback ishlasin
-    if fastsaver_result and not fastsaver_result.get('error') and fastsaver_result.get('download_url'):
-        fastsaver_result['method'] = 'fastsaver'
-        print("[LOG] Media FastSaver API orqali yuklandi")
-        return fastsaver_result
-    else:
-        ytdlp_result = download_with_ytdlp(url)
-        if ytdlp_result and ytdlp_result.get('download_url'):
-            ytdlp_result['method'] = 'ytdlp'
-            print("[LOG] Media yt-dlp orqali yuklandi")
-            return ytdlp_result
-        else:
-            print("[LOG] Hech qanday media topilmadi")
-            # Fastsaver xatoliklari ham foydalanuvchiga qaytarilsin
-            return fastsaver_result if fastsaver_result else {"error": True, "error_message": "Hech qanday media topilmadi"}
 
 def is_video_url(text: str) -> bool:
     url_regex = re.compile(r"https?://[\w./?=&%-]+", re.IGNORECASE)
     return bool(url_regex.search(text))
+
+# Yangi universal_download: faqat yt-dlp asosida
+from bot.downloader import download_video_with_info, DownloadError
+
+def universal_download(url, download_dir="downloads"):
+    try:
+        video_path, info = download_video_with_info(url, download_dir)
+        audio_url = None
+        # Agar info dictda audio link bo‘lsa, uni ham qaytar
+        if info and 'requested_formats' in info:
+            for fmt in info['requested_formats']:
+                if fmt.get('acodec') != 'none' and fmt.get('url'):
+                    audio_url = fmt['url']
+                    break
+        return {
+            "download_url": video_path,
+            "audio_url": audio_url,
+            "media_type": info.get('ext') if info else None,
+            "thumb": info.get('thumbnail') if info else None,
+            "info": info,
+            "method": "ytdlp",
+            "error": False
+        }
+    except DownloadError as e:
+        print(f"[ERROR] yt-dlp xatolik: {e}")
+        return {
+            "error": True,
+            "error_message": f"yt-dlp xatolik yoki media topilmadi: {e}"
+        }
