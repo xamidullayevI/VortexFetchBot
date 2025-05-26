@@ -12,7 +12,15 @@ from bot.downloader import download_video_with_info, DownloadError
 
 def universal_download(url, download_dir="downloads"):
     try:
-        video_path, info = download_video_with_info(url, download_dir)
+        result = download_video_with_info(url, download_dir)
+        if not isinstance(result, tuple) or len(result) != 2:
+            print(f"[ERROR] download_video_with_info returned unexpected value: {result}")
+            return {
+                "error": True,
+                "error_message": "download_video_with_info noto'g'ri qiymat qaytardi (2 ta qiymat kutildi)",
+                "raw_result": result
+            }
+        video_path, info = result
         audio_url = None
         # Agar info dictda audio link bo‘lsa, uni ham qaytar
         if info and 'requested_formats' in info:
