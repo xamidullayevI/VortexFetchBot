@@ -36,13 +36,14 @@ async def extract_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
         
         try:
-            subprocess.run(
-                ["ffmpeg", "-i", video_path, "-q:a", "0", "-map", "a", audio_path],
-                check=True
-            )
-            
+            # Yuqori sifatli audio extract (44100 Hz, 192k bitrate)
+            subprocess.run([
+                "ffmpeg", "-i", video_path, "-vn", "-ar", "44100", "-ab", "192k", "-acodec", "mp3", audio_path
+            ], check=True)
+
             music_info = get_music_info(audio_path)
-            
+            print("ACRCLOUD RESULT:", music_info)  # LOG natija
+
             if music_info:
                 caption = (
                     f"🎵 Original qo'shiq:\n"
@@ -52,8 +53,8 @@ async def extract_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"📅 Chiqarilgan sana: {music_info['release_date']}"
                 )
             else:
-                caption = "🎵 Videoning audio versiyasi"
-            
+                caption = "🎵 Videoning audio versiyasi\n❗ Original qo'shiq aniqlanmadi."
+
             with open(audio_path, "rb") as audio_file:
                 await query.message.reply_audio(
                     audio_file,
