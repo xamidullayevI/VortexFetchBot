@@ -43,19 +43,18 @@ class VideoService:
                 error_message = result.get('error_message', '❗ Media topilmadi yoki yuklab bo\'lmadi.') if result else '❗ Media topilmadi yoki yuklab bo\'lmadi.'
                 return {'success': False, 'error': error_message}
 
-            download_url = result.get('download_url')
-            if not download_url:
+            video_path = result.get('download_url')
+            video_info = result.get('info')
+            if not video_path:
                 return {'success': False, 'error': '❗ Media topilmadi yoki yuklab bo\'lmadi. (download_url yo\'q)'}
 
-            # Videoni yuklab olish
             try:
-                video_path, video_info = download_video(url, cls.DOWNLOAD_DIR)
-            except DownloadError as e:
-                return {'success': False, 'error': f"❌ Yuklab olishda xatolik: {str(e)}"}
+                file_size = os.path.getsize(video_path)
+            except Exception as e:
+                return {'success': False, 'error': f"❌ Fayl topilmadi yoki o'qib bo'lmadi: {str(e)}"}
 
-            file_size = os.path.getsize(video_path)
             network_name = cls.get_network_name(url)
-            video_title = video_info.get('title') or os.path.splitext(os.path.basename(video_path))[0]
+            video_title = video_info.get('title') if video_info else os.path.splitext(os.path.basename(video_path))[0]
 
             # Fayl hajmi tekshiruvi
             if file_size > cls.MAX_TELEGRAM_SIZE:
