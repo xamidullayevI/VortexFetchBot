@@ -104,13 +104,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     url = urls[0]
     msg = await update.message.reply_text("⏳ Fayl yuklanmoqda. Iltimos, kuting...")
     try:
-
         import uuid
         unique_id = str(uuid.uuid4())
         video_path = os.path.join(DOWNLOAD_DIR, f"video_{unique_id}.mp4")
         compressed_path = os.path.join(DOWNLOAD_DIR, f"video_{unique_id}_compressed.mp4")
+        # LOG: universal_download orqali yuklash usuli va audio_url ni logga yozamiz
+        from bot.utils import universal_download
+        download_url, method, audio_url = universal_download(url)
+        print(f"[LOG] Yuklash usuli: {method}, audio_url: {audio_url}")
+        # Agar audio_url bo‘lsa, tugma qo‘shamiz
+        extra_buttons = []
+        if audio_url:
+            from telegram import InlineKeyboardButton
+            extra_buttons.append([InlineKeyboardButton(text="🎵 Orginal qo'shiqni yuklash", url=audio_url)])
         try:
-            # Video va info ni qaytaradigan yangi funksiya ishlatiladi
             from bot.downloader import download_video_with_info
             video_path, video_info = download_video_with_info(url, DOWNLOAD_DIR)
             file_size = os.path.getsize(video_path)
@@ -141,37 +148,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     return 'Video'
             network_name = get_network_name(url)
-            # Video sarlavhasi (ijtimoiy tarmoqdagi nomi)
             video_title = video_info.get('title') or os.path.splitext(os.path.basename(video_path))[0]
             caption = f"{network_name}: {video_title}"
             ext = os.path.splitext(video_path)[1].lower()
             image_exts = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
+            from telegram import InlineKeyboardMarkup
+            reply_markup = InlineKeyboardMarkup(extra_buttons) if extra_buttons else None
             if file_size <= max_telegram_size:
                 with open(video_path, "rb") as file:
                     if ext in image_exts:
-                        await update.message.reply_photo(file, caption=caption)
+                        await update.message.reply_photo(file, caption=caption, reply_markup=reply_markup)
                     else:
-                        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
                         audio_button = InlineKeyboardMarkup([
                             [InlineKeyboardButton(text="🎵 Audio yuklab olish", callback_data=f"get_audio:{unique_id}")]
-                        ])
+                        ] + extra_buttons)
                         await update.message.reply_video(file, caption=caption, reply_markup=audio_button)
                 await msg.delete()
             elif file_size <= 2 * 1024 * 1024 * 1024:  # 2 GB
                 with open(video_path, "rb") as file:
                     if ext in image_exts:
-                        await update.message.reply_photo(file, caption=caption)
+                        await update.message.reply_photo(file, caption=caption, reply_markup=reply_markup)
                     else:
-                        await update.message.reply_document(file, caption=caption)
+                        await update.message.reply_document(file, caption=caption, reply_markup=reply_markup)
                 await msg.delete()
             else:
-                # Video 2 GB dan katta bo‘lsa, siqiladi
                 await msg.edit_text("⚠️ Fayl 2 GB dan katta! Video siqilmoqda, kuting...")
                 from bot.video_compress import compress_video
-                compress_video(video_path, compressed_path, target_size_mb=2000)  # 2 GB limit uchun
+                compress_video(video_path, compressed_path, target_size_mb=2000)
                 compressed_size = os.path.getsize(compressed_path)
                 if compressed_size > 2 * 1024 * 1024 * 1024:
-                    # Fayl hamon katta bo‘lsa, foydalanuvchiga link orqali yuklab olishni taklif qilish
                     await msg.edit_text("❌ Siqilgan video ham 2 GB dan katta. Telegram orqali yuborib bo‘lmaydi. Faylni tashqi hostingga yuklab, link yuborilmoqda...")
                     try:
                         import requests
@@ -186,13 +191,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 await msg.edit_text("⏳ Video siqildi. Endi Telegramga yuklanmoqda...")
                 with open(compressed_path, "rb") as file:
-                    await update.message.reply_document(file, caption=caption)
+                    await update.message.reply_document(file, caption=caption, reply_markup=reply_markup)
                 await msg.delete()
-
         except Exception as e:
             err_msg = str(e)
             if 'There is no video in this post' in err_msg:
-                # Instagram rasmli post uchun fallback
                 try:
                     import requests
                     from bs4 import BeautifulSoup
@@ -201,13 +204,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     og_image = soup.find('meta', property='og:image')
                     image_url = og_image['content'] if og_image else None
                     if image_url:
-                        # Try to get higher resolution by replacing size in URL
                         highres_url = image_url.replace('s150x150', 's1080x1080').replace('p150x150', 'p1080x1080')
                         img_resp = requests.get(highres_url)
                         from io import BytesIO
                         img_bytes = BytesIO(img_resp.content)
                         img_bytes.name = 'instagram.jpg'
-                        await update.message.reply_photo(img_bytes, caption="Instagram: Rasmli post")
+                        await update.message.reply_photo(img_bytes, caption="Instagram: Rasmli post", reply_markup=reply_markup)
                         await msg.delete()
                     else:
                         await msg.edit_text("❗ Bu postda video ham, rasm ham topilmadi.")
@@ -216,14 +218,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 await msg.edit_text(f"❌ Video jarayonida xatolik: {e}")
         finally:
-            # Har doim vaqtinchalik fayllarni tozalash
             for f in [video_path, compressed_path]:
                 try:
                     if os.path.exists(f):
                         os.remove(f)
                 except Exception:
                     pass
-
     except DownloadError as e:
         await msg.edit_text(f"❌ Error while downloading: {e}")
     except Exception as e:
