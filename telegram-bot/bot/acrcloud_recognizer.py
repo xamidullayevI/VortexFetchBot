@@ -1,10 +1,12 @@
+import os
 import time
-import hashlib
 import hmac
 import base64
+import hashlib
 import requests
-import os
-import subprocess
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def extract_audio_from_video(video_path: str, audio_path: str = None) -> str:
     """
@@ -18,35 +20,55 @@ def extract_audio_from_video(video_path: str, audio_path: str = None) -> str:
     return audio_path
 
 
-def recognize_audio_acrcloud(audio_file_path: str,
-                             host: str,
-                             access_key: str,
-                             access_secret: str) -> dict:
-    """
-    ACRCloud API orqali audio fayldan original musiqani aniqlash.
-    """
+def get_music_info(audio_file):
+    host = os.getenv("ACRCLOUD_HOST")
+    access_key = os.getenv("ACRCLOUD_ACCESS_KEY")
+    access_secret = os.getenv("ACRCLOUD_ACCESS_SECRET")
+
     http_method = "POST"
     http_uri = "/v1/identify"
     data_type = "audio"
     signature_version = "1"
-    timestamp = str(int(time.time()))
+    timestamp = time.time()
 
-    string_to_sign = "\n".join([http_method, http_uri, access_key, data_type, signature_version, timestamp])
+    string_to_sign = '\n'.join([
+        http_method,
+        http_uri,
+        access_key,
+        data_type,
+        signature_version,
+        str(timestamp)
+    ])
+
     sign = base64.b64encode(
-        hmac.new(access_secret.encode('utf-8'), string_to_sign.encode('utf-8'), digestmod=hashlib.sha1).digest()
-    ).decode('utf-8')
+        hmac.new(access_secret.encode('ascii'), string_to_sign.encode('ascii'),
+                 digestmod=hashlib.sha1).digest()
+    ).decode('ascii')
 
-    files = {'sample': open(audio_file_path, 'rb')}
-    data = {
-        'access_key': access_key,
-        'data_type': data_type,
-        'signature_version': signature_version,
-        'signature': sign,
-        'timestamp': timestamp,
-    }
-    url = f"https://{host}/v1/identify"
-    response = requests.post(url, files=files, data=data, timeout=10)
-    return response.json()
+    with open(audio_file, 'rb') as f:
+        files = {'sample': f}
+        data = {
+            'access_key': access_key,
+            'data_type': data_type,
+            'signature_version': signature_version,
+            'signature': sign,
+            'timestamp': str(timestamp),
+        }
+        
+        r = requests.post(f'https://{host}{http_uri}', files=files, data=data)
+        r.raise_for_status()
+        result = r.json()
+        
+        if 'status' in result and result['status']['code'] == 0:
+            music_info = result['metadata']['music'][0]
+            return {
+                'title': music_info.get('title', 'Unknown'),
+                'artist': music_info.get('artists', [{'name': 'Unknown'}])[0]['name'],
+                'album': music_info.get('album', {}).get('name', 'Unknown'),
+                'release_date': music_info.get('release_date', 'Unknown'),
+                'external_metadata': music_info.get('external_metadata', {})
+            }
+    return None
 
 
 def get_music_info_from_video(video_path: str) -> dict:

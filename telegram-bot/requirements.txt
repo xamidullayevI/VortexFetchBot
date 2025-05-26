@@ -1,6 +1,7 @@
 python-telegram-bot
-yt-dlp
 python-dotenv
+yt-dlp
 requests
+ffmpeg-python
 # boshqa kutubxonalarsoup4
 beautifulsoup4
