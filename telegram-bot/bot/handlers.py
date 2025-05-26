@@ -12,7 +12,7 @@ URL_REGEX = re.compile(r"https?://[\w./?=&%-]+", re.IGNORECASE)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 o to VortexFetchBot!\nJust send me a video link from YouTube, Instagram, TikTok, or other social platforms, and I will fetch the video for you."
+        "👋 Hello to VortexFetchBot!\nJust send me a video link from YouTube, Instagram, TikTok, or other social platforms, and I will fetch the video for you."
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
