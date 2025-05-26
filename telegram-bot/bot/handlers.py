@@ -110,9 +110,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         compressed_path = os.path.join(DOWNLOAD_DIR, f"video_{unique_id}_compressed.mp4")
         # LOG: universal_download orqali yuklash usuli va audio_url ni logga yozamiz
         from bot.utils import universal_download
-        download_url, method, audio_url = universal_download(url)
-        print(f"[LOG] Yuklash usuli: {method}, audio_url: {audio_url}")
-        # Agar audio_url bo‘lsa, tugma qo‘shamiz
+        result = universal_download(url)
+        if not result or not result.get('download_url'):
+            await msg.edit_text("❗ Media topilmadi yoki yuklab bo‘lmadi.")
+            return
+        download_url = result['download_url']
+        audio_url = result.get('audio_url')
+        media_type = result.get('media_type')
+        thumb = result.get('thumb')
+        info = result.get('info')
+        method = result.get('method')
+        print(f"[LOG] Yuklash usuli: {method}, audio_url: {audio_url}, media_type: {media_type}")
         # Tugmalar: faqat audio_url bo'lsa, ikkita tugma chiqsin. Bo'lmasa faqat audio ajratish tugmasi.
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         if audio_url:
