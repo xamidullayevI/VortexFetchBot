@@ -113,9 +113,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         download_url, method, audio_url = universal_download(url)
         print(f"[LOG] Yuklash usuli: {method}, audio_url: {audio_url}")
         # Agar audio_url bo‘lsa, tugma qo‘shamiz
-        extra_buttons = []
+        # Tugmalar: faqat audio_url bo'lsa, ikkita tugma chiqsin. Bo'lmasa faqat audio ajratish tugmasi.
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         if audio_url:
-            extra_buttons.append([InlineKeyboardButton(text="🎵 Orginal qo'shiqni yuklash", url=audio_url)])
+            extra_buttons = [
+                [InlineKeyboardButton(text="🎵 Audio yuklab olish", callback_data=f"get_audio:{unique_id}")],
+                [InlineKeyboardButton(text="🎵 Orginal qo'shiqni yuklash", url=audio_url)]
+            ]
+        else:
+            extra_buttons = [
+                [InlineKeyboardButton(text="🎵 Audio yuklab olish", callback_data=f"get_audio:{unique_id}")]
+            ]
         try:
             from bot.downloader import download_video_with_info
             video_path, video_info = download_video_with_info(url, DOWNLOAD_DIR)
@@ -151,16 +159,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption = f"{network_name}: {video_title}"
             ext = os.path.splitext(video_path)[1].lower()
             image_exts = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
-            reply_markup = InlineKeyboardMarkup(extra_buttons) if extra_buttons else None
+            reply_markup = InlineKeyboardMarkup(extra_buttons)
             if file_size <= max_telegram_size:
                 with open(video_path, "rb") as file:
                     if ext in image_exts:
                         await update.message.reply_photo(file, caption=caption, reply_markup=reply_markup)
                     else:
-                        audio_button = InlineKeyboardMarkup([
-                            [InlineKeyboardButton(text="🎵 Audio yuklab olish", callback_data=f"get_audio:{unique_id}")]
-                        ] + extra_buttons)
-                        await update.message.reply_video(file, caption=caption, reply_markup=audio_button)
+                        await update.message.reply_video(file, caption=caption, reply_markup=reply_markup)
                 await msg.delete()
             elif file_size <= 2 * 1024 * 1024 * 1024:  # 2 GB
                 with open(video_path, "rb") as file:
