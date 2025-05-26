@@ -115,7 +115,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Agar audio_url bo‘lsa, tugma qo‘shamiz
         extra_buttons = []
         if audio_url:
-            from telegram import InlineKeyboardButton
             extra_buttons.append([InlineKeyboardButton(text="🎵 Orginal qo'shiqni yuklash", url=audio_url)])
         try:
             from bot.downloader import download_video_with_info
@@ -152,7 +151,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption = f"{network_name}: {video_title}"
             ext = os.path.splitext(video_path)[1].lower()
             image_exts = ['.jpg', '.jpeg', '.png', '.webp', '.gif']
-            from telegram import InlineKeyboardMarkup
             reply_markup = InlineKeyboardMarkup(extra_buttons) if extra_buttons else None
             if file_size <= max_telegram_size:
                 with open(video_path, "rb") as file:
