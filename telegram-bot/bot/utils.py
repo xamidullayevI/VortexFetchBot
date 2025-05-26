@@ -8,32 +8,54 @@ def download_with_fastsaver(url):
     Instagram, TikTok, Facebook, Twitter, Pinterest, Threads, Snapchat, Likee va boshqalar uchun.
     """
     api_key = os.getenv("FASTSAVER_API_KEY")
+    if not api_key:
+        print("[ERROR] FASTSAVER_API_KEY environment variable topilmadi!")
+        return {
+            "error": True,
+            "error_message": "FastSaver API token topilmadi. Railway yoki .env faylga FASTSAVER_API_KEY ni to‘g‘ri yozing!"
+        }
     api_url = "https://fastsaverapi.com/api/get-info"
     params = {"url": url, "token": api_key}
     try:
         response = requests.get(api_url, params=params, timeout=20)
-        data = response.json()
-        print(f"[LOG] FastSaver API javobi: {data}")
-        # Xatolik bo'lmasa va download_url bor bo'lsa
-        if not data.get("error") and data.get("download_url"):
-            download_url = data.get("download_url")
-            # Rasm uchun ham download_url qaytadi (type: image)
-            # Audio uchun audio_url yoki music_url bo'lishi mumkin
-            audio_url = data.get("audio_url") or data.get("music_url")
-            media_type = data.get("type")  # video, image, audio
-            thumb = data.get("thumb")
+        try:
+            data = response.json()
+        except Exception:
+            print(f"[ERROR] FastSaver API javobi JSON formatda emas: {response.text}")
             return {
-                "download_url": download_url,
-                "audio_url": audio_url,
-                "media_type": media_type,
-                "thumb": thumb,
-                "info": data
+                "error": True,
+                "error_message": f"FastSaver API javobi JSON formatda emas: {response.text}"
             }
-        else:
-            return None
+        print(f"[LOG] FastSaver API javobi: {data}")
+        # API xatoliklari uchun aniq xabar
+        if 'detail' in data and data['detail'] == 'Not found':
+            return {
+                "error": True,
+                "error_message": "FastSaver API: 'Not found'. Token yoki endpoint xato yoki noto‘g‘ri URL yuborildi."
+            }
+        if data.get('error') or not data.get('download_url'):
+            return {
+                "error": True,
+                "error_message": f"FastSaver API xatolik yoki media topilmadi: {data}"
+            }
+        download_url = data.get("download_url")
+        audio_url = data.get("audio_url") or data.get("music_url")
+        media_type = data.get("type")
+        thumb = data.get("thumb")
+        return {
+            "download_url": download_url,
+            "audio_url": audio_url,
+            "media_type": media_type,
+            "thumb": thumb,
+            "info": data,
+            "error": False
+        }
     except Exception as e:
-        print(f"[LOG] FastSaver API xatolik: {e}")
-        return None
+        print(f"[ERROR] FastSaver API xatolik: {e}")
+        return {
+            "error": True,
+            "error_message": f"FastSaver API so‘rovda xatolik: {e}"
+        }
 
 
 

@@ -111,8 +111,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # LOG: universal_download orqali yuklash usuli va audio_url ni logga yozamiz
         from bot.utils import universal_download
         result = universal_download(url)
-        if not result or not result.get('download_url'):
-            await msg.edit_text("❗ Media topilmadi yoki yuklab bo‘lmadi.")
+        # Xatoliklar uchun aniq va tushunarli xabar
+        if not result or result.get('error'):
+            error_message = result.get('error_message', '❗ Media topilmadi yoki yuklab bo‘lmadi.') if result else '❗ Media topilmadi yoki yuklab bo‘lmadi.'
+            await msg.edit_text(error_message)
+            return
+        if not result.get('download_url'):
+            await msg.edit_text('❗ Media topilmadi yoki yuklab bo‘lmadi. (download_url yo‘q)')
             return
         download_url = result['download_url']
         audio_url = result.get('audio_url')
