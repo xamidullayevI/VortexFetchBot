@@ -69,22 +69,24 @@ def download_with_ytdlp(url):
 def universal_download(url):
     """
     Universal yuklab olish: avval FastSaver, keyin fallback yt-dlp.
-    Har doim dict qaytaradi: {download_url, audio_url, media_type, thumb, info, method}
+    Har doim dict qaytaradi: {download_url, audio_url, media_type, thumb, info, method, error, error_message}
     """
     fastsaver_result = download_with_fastsaver(url)
-    if fastsaver_result:
+    # Fastsaver natijasida error yoki download_url yo‘q bo‘lsa, fallback ishlasin
+    if fastsaver_result and not fastsaver_result.get('error') and fastsaver_result.get('download_url'):
         fastsaver_result['method'] = 'fastsaver'
         print("[LOG] Media FastSaver API orqali yuklandi")
         return fastsaver_result
     else:
         ytdlp_result = download_with_ytdlp(url)
-        if ytdlp_result:
+        if ytdlp_result and ytdlp_result.get('download_url'):
             ytdlp_result['method'] = 'ytdlp'
             print("[LOG] Media yt-dlp orqali yuklandi")
             return ytdlp_result
         else:
             print("[LOG] Hech qanday media topilmadi")
-            return None
+            # Fastsaver xatoliklari ham foydalanuvchiga qaytarilsin
+            return fastsaver_result if fastsaver_result else {"error": True, "error_message": "Hech qanday media topilmadi"}
 
 def is_video_url(text: str) -> bool:
     url_regex = re.compile(r"https?://[\w./?=&%-]+", re.IGNORECASE)
