@@ -5,7 +5,7 @@ import psutil
 from typing import Dict, Any, Optional
 from pathlib import Path
 
-from ..downloader import download_video_with_info
+from ..downloader import download_video_with_info, DownloadError
 from ..video_compress import compress_video
 from ..utils import (
     ensure_downloads_dir,
@@ -46,67 +46,75 @@ class VideoService:
             # Unique ID yaratish
             unique_id = uuid.uuid4().hex
             
-            # Video yuklab olish
-            video_path, info = download_video_with_info(url, str(self.downloads_dir))
-            if not video_path or not os.path.exists(video_path):
-                return {
-                    'success': False,
-                    'error': "❌ Video yuklab olinmadi"
-                }
+            try:
+                # Video yuklab olish
+                video_path, info = download_video_with_info(url, str(self.downloads_dir))
+                if not video_path or not os.path.exists(video_path):
+                    return {
+                        'success': False,
+                        'error': "❌ Video yuklab olinmadi"
+                    }
 
-            file_size = os.path.getsize(video_path)
-            
-            # Railway xotira cheklovini tekshirish
-            if file_size > self.RAILWAY_MAX_SIZE:
-                cleanup_file(video_path)
-                return {
-                    'success': False,
-                    'error': "❌ Video hajmi juda katta (450MB dan oshmasligi kerak)"
-                }
-
-            # Xotira yetishmasligini oldini olish uchun katta videolarni avtomatik siqish
-            if file_size > self.COMPRESS_TARGET_SIZE or self._is_memory_critical():
-                needs_compression = True
-            else:
-                needs_compression = file_size > self.MAX_TELEGRAM_SIZE
-
-            # Video ma'lumotlarini olish
-            duration = info.get('duration', 0)
-            title = info.get('title', 'Video')
-            uploader = info.get('uploader', 'Unknown')
-
-            # Caption tayyorlash
-            caption = (
-                f"📹 *{title}*\n"
-                f"👤 *Kanal:* {uploader}\n"
-                f"⏱ *Davomiyligi:* {format_duration(duration)}\n"
-                f"📦 *Hajmi:* {format_size(file_size)}"
-            )
-
-            # Agar video hajmi katta bo'lsa yoki xotira tanqis bo'lsa, siqish
-            if needs_compression:
-                compressed_path = generate_temp_filename(prefix="compressed_", suffix=".mp4")
-                target_size = min(45, max(20, self._get_optimal_target_size()))
+                file_size = os.path.getsize(video_path)
                 
-                compressed_result = compress_video(
-                    video_path,
-                    compressed_path,
-                    target_size_mb=target_size
-                )
-                
-                if compressed_result:
+                # Railway xotira cheklovini tekshirish
+                if file_size > self.RAILWAY_MAX_SIZE:
                     cleanup_file(video_path)
-                    video_path = compressed_result
+                    return {
+                        'success': False,
+                        'error': "❌ Video hajmi juda katta (450MB dan oshmasligi kerak)"
+                    }
 
-            # Natijani qaytarish
-            return {
-                'success': True,
-                'video_path': video_path,
-                'caption': caption,
-                'unique_id': unique_id,
-                'audio_url': info.get('url'),
-                'info': info
-            }
+                # Video ma'lumotlarini olish
+                duration = info.get('duration', 0)
+                title = info.get('title', 'Video')
+                uploader = info.get('uploader', 'Unknown')
+
+                # Caption tayyorlash
+                caption = (
+                    f"📹 *{title}*\n"
+                    f"👤 *Kanal:* {uploader}\n"
+                    f"⏱ *Davomiyligi:* {format_duration(duration)}\n"
+                    f"📦 *Hajmi:* {format_size(file_size)}"
+                )
+
+                # Agar video hajmi katta bo'lsa yoki xotira tanqis bo'lsa, siqish
+                if file_size > self.COMPRESS_TARGET_SIZE or self._is_memory_critical():
+                    needs_compression = True
+                else:
+                    needs_compression = file_size > self.MAX_TELEGRAM_SIZE
+
+                # Video siqish kerak bo'lsa
+                if needs_compression:
+                    compressed_path = generate_temp_filename(prefix="compressed_", suffix=".mp4")
+                    target_size = min(45, max(20, self._get_optimal_target_size()))
+                    
+                    compressed_result = compress_video(
+                        video_path,
+                        compressed_path,
+                        target_size_mb=target_size
+                    )
+                    
+                    if compressed_result:
+                        cleanup_file(video_path)
+                        video_path = compressed_result
+
+                # Natijani qaytarish
+                return {
+                    'success': True,
+                    'video_path': video_path,
+                    'caption': caption,
+                    'unique_id': unique_id,
+                    'audio_url': info.get('url'),
+                    'info': info
+                }
+
+            except DownloadError as e:
+                logger.error(f"Video yuklab olishda xatolik: {e}")
+                return {
+                    'success': False,
+                    'error': str(e)
+                }
 
         except Exception as e:
             logger.error(f"Video qayta ishlashda xatolik: {e}")

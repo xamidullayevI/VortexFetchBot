@@ -4,6 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from ..services.video_service import VideoService
 from ..services.rate_limiter import RateLimiter
+from ..downloader import DownloadError
 
 URL_REGEX = re.compile(r"https?://[\w./?=&%-]+", re.IGNORECASE)
 
@@ -72,9 +73,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 await msg.delete()
                 
-    except Exception as e:
+    except DownloadError as e:
+        await msg.edit_text(f"❌ Videoni yuklab olishda xatolik: {str(e)}")
         # Xatolik bo'lsa rate limitni oshirmaslik
         rate_limiter.user_limits[user_id].count -= 1
+    except Exception as e:
         await msg.edit_text(f"❌ Xatolik yuz berdi: {str(e)}")
+        # Xatolik bo'lsa rate limitni oshirmaslik
+        rate_limiter.user_limits[user_id].count -= 1
     finally:
         VideoService.cleanup_files(result.get('video_path', ''))

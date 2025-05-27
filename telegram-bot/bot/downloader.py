@@ -7,6 +7,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+class DownloadError(Exception):
+    """Video yuklab olishda xatolik yuz berganda ko'tariladigan exception"""
+    pass
+
 class RailwayYoutubeLogger:
     """Railway muhiti uchun maxsus logger"""
     def debug(self, msg):
@@ -69,6 +73,9 @@ def download_video_with_info(url: str, download_path: str) -> Tuple[Optional[str
         
     Returns:
         Tuple[str, dict]: Video fayl manzili va ma'lumotlar
+        
+    Raises:
+        DownloadError: Video yuklab olishda xatolik yuz berganda
     """
     try:
         with yt_dlp.YoutubeDL(get_download_options(download_path)) as ydl:
@@ -77,7 +84,7 @@ def download_video_with_info(url: str, download_path: str) -> Tuple[Optional[str
                 info = ydl.extract_info(url, download=True)
                 if not info:
                     logger.error(f"Video ma'lumotlarini olib bo'lmadi: {url}")
-                    return None, {}
+                    raise DownloadError("Video ma'lumotlarini yuklab olib bo'lmadi")
 
                 # Fayl manzilini olish
                 if 'entries' in info:
@@ -99,14 +106,14 @@ def download_video_with_info(url: str, download_path: str) -> Tuple[Optional[str
                     logger.warning(f"Video hajmi juda katta: {file_size / (1024*1024):.1f}MB")
                     if os.path.exists(filename):
                         os.remove(filename)
-                    return None, {}
+                    raise DownloadError("Video hajmi juda katta (450MB dan oshmasligi kerak)")
 
                 return filename, info
 
             except Exception as e:
                 logger.error(f"Video yuklab olishda xatolik: {str(e)}")
-                return None, {}
+                raise DownloadError(f"Video yuklab olishda xatolik: {str(e)}")
 
     except Exception as e:
         logger.error(f"YoutubeDL xatoligi: {str(e)}")
-        return None, {}
+        raise DownloadError(f"YoutubeDL xatoligi: {str(e)}")
