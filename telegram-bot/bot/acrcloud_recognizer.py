@@ -5,9 +5,21 @@ import base64
 import hashlib
 import requests
 import subprocess
+import logging
+import asyncio
+import acrcloud.acrcloud_extr_tool
 from dotenv import load_dotenv
+from typing import Dict, Optional
+from .services.monitoring import metrics
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
+
+# ACRCloud credentials from environment variables
+ACR_HOST = os.getenv('ACRCLOUD_HOST')
+ACR_ACCESS_KEY = os.getenv('ACRCLOUD_ACCESS_KEY')
+ACR_ACCESS_SECRET = os.getenv('ACRCLOUD_ACCESS_SECRET')
 
 def extract_audio_from_video(video_path: str, audio_path: str = None) -> str:
     """
@@ -73,6 +85,77 @@ def get_music_info(audio_file):
                 'external_metadata': music_info.get('external_metadata', {})
             }
     return None
+
+
+async def recognize_music(audio_path: str) -> Optional[Dict]:
+    """
+    Recognize music using ACRCloud service
+    Returns dict with music info or None if not found/error
+    """
+    try:
+        if not all([ACR_HOST, ACR_ACCESS_KEY, ACR_ACCESS_SECRET]):
+            logger.error("ACRCloud credentials not configured")
+            return None
+
+        config = {
+            'host': ACR_HOST,
+            'access_key': ACR_ACCESS_KEY,
+            'access_secret': ACR_ACCESS_SECRET,
+            'debug': False,
+            'timeout': 10
+        }
+
+        # Create recognizer
+        client = acrcloud.acrcloud_extr_tool.ExtrTool(config)
+
+        # Run recognition in executor to avoid blocking
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None,
+            client.recognize_by_file,
+            audio_path,
+            0,  # Start time offset
+            10   # Duration to analyze (seconds)
+        )
+
+        if not result or 'status' not in result or result['status']['code'] != 0:
+            logger.info("No music found or error in recognition")
+            return None
+
+        music = result.get('metadata', {}).get('music', [])
+        if not music:
+            logger.info("No music metadata found")
+            return None
+
+        # Get first match
+        track = music[0]
+        
+        # Format response
+        response = {
+            'title': track.get('title', 'Unknown Title'),
+            'artist': track.get('artists', [{'name': 'Unknown Artist'}])[0]['name'],
+            'album': track.get('album', {}).get('name', 'Unknown Album'),
+            'release_date': track.get('release_date', 'Unknown Date'),
+            'score': track.get('score', 0)
+        }
+
+        # Add streaming links if available
+        external_metadata = track.get('external_metadata', {})
+        
+        if 'spotify' in external_metadata:
+            spotify = external_metadata['spotify']
+            response['spotify'] = f"https://open.spotify.com/track/{spotify['track']['id']}"
+            
+        if 'apple_music' in external_metadata:
+            response['apple_music'] = external_metadata['apple_music'].get('url')
+
+        metrics.track_successful_music_recognition()
+        return response
+
+    except Exception as e:
+        logger.error(f"Error in music recognition: {e}")
+        metrics.track_error(type(e).__name__)
+        return None
 
 
 def get_music_info_from_video(video_path: str) -> dict:

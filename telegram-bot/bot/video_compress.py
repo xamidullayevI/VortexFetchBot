@@ -1,102 +1,200 @@
 import os
-import logging
-import subprocess
 import json
-import psutil
-from typing import Optional
+import logging
+import asyncio
+import subprocess
+from typing import Optional, Dict, Any
+from pathlib import Path
+
+from .services.monitoring import metrics
+from .config.config import config
+from .utils import run_command
 
 logger = logging.getLogger(__name__)
 
-def compress_video(
-    input_path: str,
-    output_path: str,
-    target_size_mb: int = 45,
-    max_cpu_percent: int = 80
-) -> Optional[str]:
-    """
-    Videoni siqish
-    
-    Args:
-        input_path: Video fayl manzili
-        output_path: Siqilgan video fayl manzili
-        target_size_mb: Maqsad fayl hajmi (MB)
-        max_cpu_percent: Maksimal CPU foydalanish foizi
-    
-    Returns:
-        str: Siqilgan video fayl manzili yoki None
-    """
+async def get_video_info(video_path: str) -> Optional[Dict[str, Any]]:
+    """Get video information using ffprobe"""
     try:
-        # Input video haqida ma'lumot olish
-        probe = subprocess.run(
-            ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', input_path],
-            capture_output=True,
-            text=True
-        )
+        cmd = [
+            'ffprobe',
+            '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_format',
+            '-show_streams',
+            video_path
+        ]
         
-        if probe.returncode != 0:
-            logger.error(f"FFprobe xatoligi: {probe.stderr}")
+        returncode, stdout, stderr = await run_command(cmd)
+        
+        if returncode != 0:
+            logger.error(f"FFprobe error: {stderr.decode()}")
             return None
             
-        video_info = json.loads(probe.stdout)
+        return json.loads(stdout.decode())
         
-        # Video duration va bitrate'ni olish
+    except Exception as e:
+        logger.error(f"Error getting video info: {e}")
+        metrics.track_error(type(e).__name__)
+        return None
+
+def calculate_target_bitrate(
+    duration: float,
+    target_size_mb: int,
+    audio_bitrate: int = 128000
+) -> int:
+    """Calculate target video bitrate based on desired file size"""
+    target_size_bits = target_size_mb * 8 * 1024 * 1024
+    audio_size = (audio_bitrate * duration) / 8
+    video_size = target_size_bits - audio_size
+    video_bitrate = int(video_size / duration)
+    return max(video_bitrate, 100000)  # Minimum 100Kbps
+
+async def compress_video(
+    input_path: str,
+    output_path: str,
+    target_size_mb: int = None,
+    max_height: int = 720
+) -> Optional[str]:
+    """Compress video to target size while maintaining quality"""
+    try:
+        if not os.path.exists(input_path):
+            logger.error(f"Input video not found: {input_path}")
+            return None
+
+        # Use config target size if not specified
+        target_size_mb = target_size_mb or config.target_video_size_mb
+            
+        # Get video information
+        video_info = await get_video_info(input_path)
+        if not video_info:
+            return None
+            
+        # Get video duration and original size
         duration = float(video_info['format']['duration'])
         original_size = os.path.getsize(input_path)
         
-        # Maqsad bitrate'ni hisoblash (bits/s)
-        target_size = target_size_mb * 1024 * 1024 * 8  # MB to bits
-        target_bitrate = int(target_size / duration)
+        # If already smaller than target, return original
+        if original_size <= target_size_mb * 1024 * 1024:
+            logger.info("Video already within size limit")
+            return input_path
+            
+        # Find video stream
+        video_stream = None
+        for stream in video_info['streams']:
+            if stream['codec_type'] == 'video':
+                video_stream = stream
+                break
+                
+        if not video_stream:
+            logger.error("No video stream found")
+            return None
+            
+        # Calculate target bitrate
+        target_bitrate = calculate_target_bitrate(
+            duration=duration,
+            target_size_mb=target_size_mb
+        )
         
-        # CPU va xotira holati bo'yicha siqish parametrlarini moslashtirish
-        cpu_percent = psutil.cpu_percent()
-        memory = psutil.virtual_memory()
+        # Calculate scaling
+        width = int(video_stream.get('width', 1920))
+        height = int(video_stream.get('height', 1080))
         
-        # Agar resurslar tanqis bo'lsa, siqishni kuchaytirish
-        if cpu_percent > max_cpu_percent or memory.percent > 80:
-            target_bitrate = int(target_bitrate * 0.8)  # 20% ko'proq siqish
-            threads = 1  # CPU yadrolari sonini kamaytirish
-        else:
-            threads = min(os.cpu_count() or 2, 2)  # Railway uchun max 2 yadro
+        if height > max_height:
+            scale_factor = max_height / height
+            width = int(width * scale_factor)
+            height = max_height
+            
+        # Ensure even dimensions
+        width = width - (width % 2)
+        height = height - (height % 2)
         
-        # FFmpeg buyrug'ini tayyorlash
-        command = [
+        # Construct ffmpeg command
+        cmd = [
             'ffmpeg',
             '-i', input_path,
             '-c:v', 'libx264',
-            '-preset', 'medium',  # Railway uchun muvozanatli preset
+            '-preset', 'medium',
             '-b:v', f'{target_bitrate}',
-            '-maxrate', f'{int(target_bitrate * 1.5)}',  # Maksimal bitrate
-            '-bufsize', f'{int(target_bitrate * 2)}',    # Buffer hajmi
-            '-threads', str(threads),
-            '-movflags', '+faststart',  # Tez boshlash uchun
-            '-y',  # Mavjud faylni qayta yozish
+            '-maxrate', f'{int(target_bitrate * 1.5)}',
+            '-bufsize', f'{int(target_bitrate * 2)}',
+            '-vf', f'scale={width}:{height}',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-ar', '44100',
+            '-movflags', '+faststart',
+            '-y',
             output_path
         ]
         
-        # Video siqish
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True
-        )
+        # Run compression
+        returncode, stdout, stderr = await run_command(cmd)
         
-        if result.returncode != 0:
-            logger.error(f"FFmpeg xatoligi: {result.stderr}")
+        if returncode != 0:
+            logger.error(f"FFmpeg error: {stderr.decode()}")
+            metrics.track_error("FFmpegError")
             return None
             
-        # Natijani tekshirish
         if os.path.exists(output_path):
             new_size = os.path.getsize(output_path)
             compression_ratio = (original_size - new_size) / original_size * 100
-            logger.info(f"Video siqildi: {compression_ratio:.1f}% hajm kamaydi")
+            logger.info(f"Video compressed: {compression_ratio:.1f}% size reduction")
             return output_path
             
     except Exception as e:
-        logger.error(f"Video siqishda xatolik: {e}")
+        logger.error(f"Error compressing video: {e}")
+        metrics.track_error(type(e).__name__)
         if os.path.exists(output_path):
             try:
                 os.remove(output_path)
             except:
                 pass
-    
+                
     return None
+
+async def extract_audio_from_video(video_path: str) -> str:
+    """Extract audio from video file using ffmpeg"""
+    try:
+        video_path = Path(video_path)
+        if not video_path.exists():
+            logger.error(f"Video file not found: {video_path}")
+            return None
+            
+        # Create audio output path
+        audio_path = video_path.with_suffix('.mp3')
+        
+        # Construct ffmpeg command
+        cmd = [
+            'ffmpeg',
+            '-i', str(video_path),
+            '-vn',  # Disable video
+            '-acodec', 'libmp3lame',
+            '-ab', '192k',
+            '-ar', '44100',
+            '-y',  # Overwrite output file
+            str(audio_path)
+        ]
+        
+        # Run ffmpeg command
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            logger.error(f"FFmpeg error: {stderr.decode()}")
+            metrics.track_error("FFmpegError")
+            return None
+            
+        if not audio_path.exists():
+            logger.error("Audio file was not created")
+            return None
+            
+        return str(audio_path)
+        
+    except Exception as e:
+        logger.error(f"Error extracting audio: {e}")
+        metrics.track_error(type(e).__name__)
+        return None

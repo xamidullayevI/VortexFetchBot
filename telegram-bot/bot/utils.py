@@ -6,46 +6,65 @@ from typing import Optional, Any, Dict
 from pathlib import Path
 from functools import wraps
 from datetime import datetime
+import uuid
 
 from bot.downloader import download_video_with_info, DownloadError
 
 logger = logging.getLogger(__name__)
 
+def extract_url(text: str) -> Optional[str]:
+    """Extract URL from text message"""
+    url_pattern = r'https?://[^\s<>"\']+'
+    match = re.search(url_pattern, text)
+    return match.group(0) if match else None
+
 def ensure_downloads_dir() -> Path:
-    """Downloads papkasini tekshirish va yaratish"""
+    """Ensure downloads directory exists"""
     downloads_dir = Path("downloads")
     downloads_dir.mkdir(exist_ok=True)
     return downloads_dir
 
-def cleanup_file(file_path: str) -> None:
-    """Faylni xavfsiz o'chirish"""
+def cleanup_file(filepath: str) -> None:
+    """Safely delete a file"""
     try:
-        if file_path and os.path.exists(file_path):
-            os.remove(file_path)
+        if filepath and os.path.exists(filepath):
+            os.remove(filepath)
+            logger.debug(f"Deleted file: {filepath}")
     except Exception as e:
-        logger.error(f"Faylni o'chirishda xatolik: {e}")
+        logger.error(f"Error cleaning up file {filepath}: {e}")
 
 def generate_temp_filename(prefix: str = "", suffix: str = "") -> str:
-    """Vaqtinchalik fayl nomi yaratish"""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    random_str = os.urandom(4).hex()
-    return f"{prefix}_{timestamp}_{random_str}{suffix}"
+    """Generate temporary filename in downloads directory"""
+    downloads_dir = ensure_downloads_dir()
+    return str(downloads_dir / f"{prefix}{uuid.uuid4()}{suffix}")
 
 def format_size(size_bytes: int) -> str:
-    """Fayl hajmini insoniy formatda qaytarish"""
+    """Format file size to human readable format"""
     for unit in ['B', 'KB', 'MB', 'GB']:
         if size_bytes < 1024:
-            return f"{size_bytes:.1f} {unit}"
+            return f"{size_bytes:.1f}{unit}"
         size_bytes /= 1024
-    return f"{size_bytes:.1f} GB"
+    return f"{size_bytes:.1f}GB"
 
 def format_duration(seconds: float) -> str:
-    """Video davomiyligini formatlash"""
-    minutes, seconds = divmod(int(seconds), 60)
-    hours, minutes = divmod(minutes, 60)
+    """Format duration in seconds to mm:ss or hh:mm:ss format"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    
     if hours > 0:
-        return f"{hours}:{minutes:02d}:{seconds:02d}"
-    return f"{minutes}:{seconds:02d}"
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+async def run_command(cmd: list) -> tuple:
+    """Run shell command asynchronously"""
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE
+    )
+    stdout, stderr = await process.communicate()
+    return process.returncode, stdout, stderr
 
 def async_error_handler(func):
     """Asinxron funksiyalar uchun xatoliklarni qayta ishlash dekorator"""
@@ -107,3 +126,38 @@ def universal_download(url, download_dir="downloads"):
             "error": True,
             "error_message": f"yt-dlp xatolik yoki media topilmadi: {e}"
         }
+
+def is_valid_url(url: str) -> bool:
+    """Check if URL is valid"""
+    url_pattern = re.compile(
+        r'^https?://'  # http:// or https://
+        r'(?:(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?|'  # domain...
+        r'localhost|'  # localhost...
+        r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'  # ...or ip
+        r'(?::\d+)?'  # optional port
+        r'(?:/?|[/?]\S+)$', re.IGNORECASE)
+    return url_pattern.match(url) is not None
+
+def sanitize_filename(filename: str) -> str:
+    """Remove invalid characters from filename"""
+    # Remove invalid characters
+    filename = re.sub(r'[<>:"/\\|?*]', '', filename)
+    # Remove control characters
+    filename = "".join(char for char in filename if ord(char) >= 32)
+    return filename.strip()
+
+def get_safe_path(base_dir: str, filename: str) -> str:
+    """Get safe file path, preventing directory traversal"""
+    safe_filename = sanitize_filename(filename)
+    return os.path.join(base_dir, safe_filename)
+
+async def check_url_access(url: str) -> bool:
+    """Check if URL is accessible"""
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.head(url, allow_redirects=True, timeout=10) as response:
+                return response.status == 200
+    except Exception as e:
+        logger.error(f"Error checking URL access: {e}")
+        return False

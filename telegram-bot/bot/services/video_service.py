@@ -2,29 +2,23 @@ import os
 import uuid
 import logging
 import psutil
+import asyncio
 from typing import Dict, Any, Optional
 from pathlib import Path
 
 from ..downloader import download_video_with_info, DownloadError
 from ..video_compress import compress_video
-from ..utils import (
-    ensure_downloads_dir,
-    cleanup_file,
-    format_size,
-    format_duration,
-    generate_temp_filename
-)
+from ..services.monitoring import metrics
+from ..config.config import config
+from ..utils import ensure_downloads_dir, cleanup_file, generate_temp_filename
 
 logger = logging.getLogger(__name__)
 
 class VideoService:
-    MAX_TELEGRAM_SIZE = 49 * 1024 * 1024  # 49MB
-    COMPRESS_TARGET_SIZE = 45 * 1024 * 1024  # 45MB
-    RAILWAY_MAX_SIZE = 450 * 1024 * 1024  # 450MB - Railway disk limit
-    MEMORY_THRESHOLD = 80  # 80% memory usage threshold
-
-    def __init__(self):
-        self.downloads_dir = ensure_downloads_dir()
+    def __init__(self, downloads_dir: str = None):
+        self.downloads_dir = Path(downloads_dir or config.downloads_dir)
+        self.processing_tasks: Dict[str, asyncio.Task] = {}
+        ensure_downloads_dir()
 
     async def download_and_process_video(self, url: str) -> Dict[str, Any]:
         """Video yuklab olish va qayta ishlash"""
@@ -44,11 +38,11 @@ class VideoService:
                 }
 
             # Unique ID yaratish
-            unique_id = uuid.uuid4().hex
+            task_id = uuid.uuid4().hex
             
             try:
                 # Video yuklab olish
-                video_path, info = download_video_with_info(url, str(self.downloads_dir))
+                video_path, info = await download_video_with_info(url, str(self.downloads_dir))
                 if not video_path or not os.path.exists(video_path):
                     return {
                         'success': False,
@@ -58,59 +52,47 @@ class VideoService:
                 file_size = os.path.getsize(video_path)
                 
                 # Railway xotira cheklovini tekshirish
-                if file_size > self.RAILWAY_MAX_SIZE:
+                if file_size > config.max_video_size_mb * 1024 * 1024:
                     cleanup_file(video_path)
                     return {
                         'success': False,
-                        'error': "❌ Video hajmi juda katta (450MB dan oshmasligi kerak)"
+                        'error': f"❌ Video hajmi juda katta ({config.max_video_size_mb}MB dan oshmasligi kerak)"
                     }
 
                 # Video ma'lumotlarini olish
-                duration = info.get('duration', 0)
                 title = info.get('title', 'Video')
                 uploader = info.get('uploader', 'Unknown')
-
-                # Caption tayyorlash
-                caption = (
-                    f"📹 *{title}*\n"
-                    f"👤 *Kanal:* {uploader}\n"
-                    f"⏱ *Davomiyligi:* {format_duration(duration)}\n"
-                    f"📦 *Hajmi:* {format_size(file_size)}"
-                )
-
-                # Agar video hajmi katta bo'lsa yoki xotira tanqis bo'lsa, siqish
-                if file_size > self.COMPRESS_TARGET_SIZE or self._is_memory_critical():
-                    needs_compression = True
-                else:
-                    needs_compression = file_size > self.MAX_TELEGRAM_SIZE
+                duration = info.get('duration', 0)
 
                 # Video siqish kerak bo'lsa
-                if needs_compression:
+                if file_size > config.target_video_size_mb * 1024 * 1024:
                     compressed_path = generate_temp_filename(prefix="compressed_", suffix=".mp4")
-                    target_size = min(45, max(20, self._get_optimal_target_size()))
-                    
                     compressed_result = compress_video(
                         video_path,
                         compressed_path,
-                        target_size_mb=target_size
+                        target_size_mb=config.target_video_size_mb
                     )
                     
                     if compressed_result:
                         cleanup_file(video_path)
                         video_path = compressed_result
+                        file_size = os.path.getsize(video_path)
 
                 # Natijani qaytarish
                 return {
                     'success': True,
                     'video_path': video_path,
-                    'caption': caption,
-                    'unique_id': unique_id,
-                    'audio_url': info.get('url'),
+                    'file_size': file_size,
+                    'title': title,
+                    'uploader': uploader,
+                    'duration': duration,
+                    'task_id': task_id,
                     'info': info
                 }
 
             except DownloadError as e:
                 logger.error(f"Video yuklab olishda xatolik: {e}")
+                metrics.track_error("DownloadError")
                 return {
                     'success': False,
                     'error': str(e)
@@ -118,6 +100,7 @@ class VideoService:
 
         except Exception as e:
             logger.error(f"Video qayta ishlashda xatolik: {e}")
+            metrics.track_error(type(e).__name__)
             return {
                 'success': False,
                 'error': f"❌ Xatolik yuz berdi: {str(e)}"
@@ -127,45 +110,37 @@ class VideoService:
         """Xotira yetarliligini tekshirish"""
         try:
             memory = psutil.virtual_memory()
-            return memory.percent < self.MEMORY_THRESHOLD
+            return memory.percent < config.max_memory_percent
         except Exception as e:
             logger.error(f"Xotirani tekshirishda xatolik: {e}")
-            return True
-
-    def _is_memory_critical(self) -> bool:
-        """Xotira holati kritik ekanligini tekshirish"""
-        try:
-            memory = psutil.virtual_memory()
-            return memory.percent > 90
-        except Exception:
+            metrics.track_error(type(e).__name__)
             return False
-
-    def _get_optimal_target_size(self) -> int:
-        """Optimal siqish hajmini hisoblash"""
-        try:
-            memory = psutil.virtual_memory()
-            # Xotira bandligi qancha yuqori bo'lsa, shuncha ko'p siqish
-            if memory.percent > 85:
-                return 20  # 20MB gacha siqish
-            elif memory.percent > 75:
-                return 30  # 30MB gacha siqish
-            else:
-                return 45  # 45MB gacha siqish
-        except Exception:
-            return 45  # Xatolik bo'lsa default qiymat
 
     def _check_disk_space(self) -> bool:
         """Railway xotirasini tekshirish"""
         try:
-            total_size = 0
-            for path in Path(self.downloads_dir).glob('**/*'):
-                if path.is_file():
-                    total_size += path.stat().st_size
-            
-            return total_size < (self.RAILWAY_MAX_SIZE * 0.9)  # 90% dan kam bo'lishi kerak
+            disk_usage = psutil.disk_usage(self.downloads_dir)
+            return disk_usage.percent < config.max_disk_percent
         except Exception as e:
-            logger.error(f"Xotirani tekshirishda xatolik: {e}")
+            logger.error(f"Disk xotirasini tekshirishda xatolik: {e}")
+            metrics.track_error(type(e).__name__)
             return False
+
+    async def cancel_processing(self, task_id: str):
+        """Videoni qayta ishlashni bekor qilish"""
+        if task_id in self.processing_tasks:
+            task = self.processing_tasks[task_id]
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            del self.processing_tasks[task_id]
+
+    async def cleanup(self):
+        """Barcha ishlov berish vazifalarini tozalash"""
+        for task_id in list(self.processing_tasks.keys()):
+            await self.cancel_processing(task_id)
 
     @staticmethod
     def cleanup_files(*file_paths: str) -> None:

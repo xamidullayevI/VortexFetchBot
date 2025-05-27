@@ -1,21 +1,27 @@
 import os
 import logging
-import asyncio
 import logging.config
+import asyncio
 from pathlib import Path
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
-from bot.handlers import (
-    start, help_command, stats_command,
-    handle_message, extract_audio, find_original
-)
+# Import handlers
+from bot.handlers.base_handlers import start_command, help_command, stats_command
+from bot.handlers.media_handlers import handle_media_message
+from bot.handlers.audio_handlers import extract_audio, find_original
+
+# Import services
 from bot.services.monitoring import metrics
 from bot.services.cleanup_service import CleanupService
 from bot.services.health_service import HealthService
 from bot.services.railway_service import RailwayService
+from bot.config.config import config
 
-# Logging konfiguratsiyasi
+# Load environment variables
+load_dotenv()
+
+# Configure logging
 logging_conf_path = Path(__file__).parent / "bot" / "config" / "logging.conf"
 if logging_conf_path.exists():
     logging.config.fileConfig(logging_conf_path)
@@ -27,57 +33,41 @@ else:
 
 logger = logging.getLogger(__name__)
 
-# Environment o'zgaruvchilarini yuklash
-load_dotenv()
-TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-ADMIN_IDS = os.getenv("ADMIN_IDS", "").split(",")
-MAX_FILE_AGE = int(os.getenv("MAX_FILE_AGE_HOURS", "1"))  # Railway uchun 1 soat
-PORT = int(os.getenv("PORT", "8080"))  # Railway uchun port
-
-if not TOKEN:
-    raise RuntimeError("TELEGRAM_BOT_TOKEN .env faylida topilmadi")
-
-def setup_downloads_folder():
-    """Downloads papkasini yaratish"""
-    downloads_dir = Path("downloads")
-    downloads_dir.mkdir(exist_ok=True)
-    return downloads_dir
-
 async def main():
+    """Start the bot"""
     try:
-        # Downloads papkasini tayyorlash
-        downloads_dir = setup_downloads_folder()
-
-        # Railway xizmatlarini sozlash
-        railway_service = RailwayService(str(downloads_dir))
+        # Initialize Railway service
+        railway_service = RailwayService(str(config.downloads_dir))
         await railway_service.start()
 
-        # Tozalash xizmatini sozlash
+        # Initialize cleanup service
         cleanup_service = CleanupService(
-            downloads_dir=str(downloads_dir),
-            max_age_hours=MAX_FILE_AGE
+            downloads_dir=str(config.downloads_dir),
+            max_age_hours=config.max_file_age
         )
         await cleanup_service.start()
 
-        # Health check xizmatini sozlash
-        health_service = HealthService(port=PORT)
+        # Initialize health check service
+        health_service = HealthService(port=config.port)
         await health_service.start()
 
-        # Bot applicationini sozlash
+        # Configure bot with higher timeouts for Railway
         from telegram.request import HTTPXRequest
         request = HTTPXRequest(read_timeout=300, connect_timeout=60)
+        
+        # Initialize bot application
         application = (
             Application.builder()
-            .token(TOKEN)
+            .token(config.token)
             .request(request)
             .build()
         )
 
-        # Handlerlarni qo'shish
-        application.add_handler(CommandHandler("start", start))
+        # Add handlers
+        application.add_handler(CommandHandler("start", start_command))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("stats", stats_command))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_media_message))
         application.add_handler(CallbackQueryHandler(extract_audio, pattern=r"^get_audio:"))
         application.add_handler(CallbackQueryHandler(find_original, pattern=r"^find_original:"))
 
@@ -92,29 +82,33 @@ async def main():
 
         application.add_error_handler(error_handler)
 
-        # Botni ishga tushirish
-        logger.info("Bot ishga tushirilmoqda...")
+        # Start bot
+        logger.info("Starting bot...")
         await application.initialize()
         await application.start()
         
-        try:
-            await application.run_polling()
-        finally:
-            # Bot to'xtaganda xizmatlarni to'xtatish
-            await cleanup_service.stop()
-            await health_service.stop()
-            await railway_service.stop()
+        # Run bot until stopped
+        logger.info("Bot is running...")
+        await application.run_polling()
 
     except Exception as e:
-        logger.error(f"Botni ishga tushirishda xatolik: {e}")
+        logger.error(f"Bot initialization error: {e}")
         metrics.track_error(type(e).__name__)
         raise
+
+    finally:
+        # Cleanup on shutdown
+        logger.info("Shutting down...")
+        await cleanup_service.stop()
+        await health_service.stop()
+        await railway_service.stop()
+        await application.stop()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logger.info("Bot to'xtatildi")
+        logger.info("Bot stopped")
     except Exception as e:
-        logger.error(f"Kutilmagan xatolik: {e}")
+        logger.error(f"Unexpected error: {e}")
         metrics.track_error(type(e).__name__)

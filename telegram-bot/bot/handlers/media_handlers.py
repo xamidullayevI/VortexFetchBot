@@ -1,85 +1,73 @@
-import os
-import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from ..services.video_service import VideoService
-from ..services.rate_limiter import RateLimiter
-from ..downloader import DownloadError
+from ..utils import extract_url
+from ..downloader import download_video
+from ..services.monitoring import metrics
 
-URL_REGEX = re.compile(r"https?://[\w./?=&%-]+", re.IGNORECASE)
-
-# Rate limiter yaratish
-rate_limiter = RateLimiter(
-    max_requests=30,     # Har bir foydalanuvchi uchun minutiga 30 ta so'rov
-    time_window=60,      # 1 daqiqa vaqt oralig'i
-    max_file_size_mb=450 # Railway uchun maksimal fayl hajmi
-)
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    urls = URL_REGEX.findall(text)
-    if not urls:
-        await update.message.reply_text("❗ Video havolasi topilmadi. Iltimos, to'g'ri havola yuboring.")
+async def handle_media_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle messages containing media URLs"""
+    if not update.effective_message or not update.effective_message.text:
         return
-
-    # Rate limitni tekshirish
-    user_id = update.effective_user.id
-    if not rate_limiter.can_process(user_id):
-        await update.message.reply_text(
-            "⚠️ Siz juda ko'p so'rov yubordingiz. "
-            "Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring."
+    
+    url = extract_url(update.effective_message.text)
+    if not url:
+        await update.effective_message.reply_text(
+            "❌ Video havolasi topilmadi. Iltimos, to'g'ri havola yuboring."
         )
         return
 
-    url = urls[0]
-    msg = await update.message.reply_text("⏳ Fayl yuklanmoqda. Iltimos, kuting...")
-
     try:
-        result = await VideoService().download_and_process_video(url)
+        # Track download attempt
+        metrics.track_download_attempt(url)
+        
+        status_message = await update.effective_message.reply_text(
+            "⏳ Video yuklab olinmoqda..."
+        )
 
-        if not result['success']:
-            await msg.edit_text(result['error'])
+        video_info = await download_video(url)
+        
+        if not video_info or not video_info.get('file_path'):
+            await status_message.edit_text(
+                "❌ Videoni yuklab olishda xatolik yuz berdi. Iltimos, keyinroq urinib ko'ring."
+            )
             return
 
-        buttons = [
-            [InlineKeyboardButton("🎵 Audio yuklab olish", callback_data=f"get_audio:{result['unique_id']}")]
-        ]
-
-        if result.get('audio_url'):
-            buttons.append([InlineKeyboardButton("🎵 Original qo'shiqni topish", callback_data=f"find_original:{result['unique_id']}")])
-
-        # Video yuborish
-        file_path = result['video_path']
-        with open(file_path, 'rb') as file:
-            if result.get('is_external'):
-                await msg.edit_text(
-                    f"🔗 Video hajmi katta. Yuklab olish havolasi: {result['download_url']}",
-                    reply_markup=InlineKeyboardMarkup(buttons)
+        # Create inline keyboard for additional options
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🎵 Audio formatda yuklash",
+                    callback_data=f"get_audio:{video_info['file_path']}"
                 )
-            else:
-                file_size = os.path.getsize(file_path)
-                if file_size > VideoService.MAX_TELEGRAM_SIZE:
-                    await update.message.reply_document(
-                        file,
-                        caption=result['caption'],
-                        filename=os.path.basename(file_path),
-                        reply_markup=InlineKeyboardMarkup(buttons)
-                    )
-                else:
-                    await update.message.reply_video(
-                        file,
-                        caption=result['caption'],
-                        reply_markup=InlineKeyboardMarkup(buttons)
-                    )
-                await msg.delete()
-                
-    except DownloadError as e:
-        await msg.edit_text(f"❌ Videoni yuklab olishda xatolik: {str(e)}")
-        # Xatolik bo'lsa rate limitni oshirmaslik
-        rate_limiter.user_limits[user_id].count -= 1
+            ],
+            [
+                InlineKeyboardButton(
+                    "🎧 Musiqani topish",
+                    callback_data=f"find_original:{video_info['file_path']}"
+                )
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        # Send the video
+        with open(video_info['file_path'], 'rb') as video_file:
+            await context.bot.send_video(
+                chat_id=update.effective_chat.id,
+                video=video_file,
+                caption=f"📹 {video_info.get('title', 'Video')}",
+                reply_markup=reply_markup
+            )
+        
+        # Track successful download
+        metrics.track_successful_download(url)
+        
+        await status_message.delete()
+
     except Exception as e:
-        await msg.edit_text(f"❌ Xatolik yuz berdi: {str(e)}")
-        # Xatolik bo'lsa rate limitni oshirmaslik
-        rate_limiter.user_limits[user_id].count -= 1
-    finally:
-        VideoService.cleanup_files(result.get('video_path', ''))
+        # Track error
+        metrics.track_error(type(e).__name__)
+        
+        await status_message.edit_text(
+            f"❌ Xatolik yuz berdi: {str(e)}\n\n"
+            "Iltimos, havolani tekshiring va qayta urinib ko'ring."
+        )
