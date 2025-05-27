@@ -1,5 +1,19 @@
 [phases.setup]
-nixPkgs = ['gcc', 'python3', 'python3-pip', 'ffmpeg']
+nixPkgs = [
+  "gcc",
+  "python3",
+  "python3-pip",
+  "python3-dev",
+  "ffmpeg",
+  "build-essential"
+]
 
 [phases.install]
-cmds = ['python -m pip install --upgrade pip', 'pip install -r requirements.txt']
+cmds = [
+  "python -m pip install --upgrade pip",
+  "pip install wheel setuptools",
+  "pip install -r requirements.txt"
+]
+
+[start]
+cmd = "python main.py"
