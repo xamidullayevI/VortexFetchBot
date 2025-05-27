@@ -6,14 +6,17 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Install build dependencies first
 COPY telegram-bot/requirements.txt .
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir wheel setuptools && \
+    pip install --no-cache-dir -r requirements.txt
 
+# Copy application files
 COPY telegram-bot .
 
+# Create downloads directory
 RUN mkdir -p downloads && chmod 777 downloads
 
 ENV PYTHONUNBUFFERED=1
-ENV PORT=8080
 
 CMD ["python", "main.py"]

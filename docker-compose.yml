@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     volumes:
       - ./telegram-bot/downloads:/app/downloads
     environment:
@@ -10,6 +12,7 @@ services:
       - ACRCLOUD_HOST=${ACRCLOUD_HOST}
       - ACRCLOUD_ACCESS_KEY=${ACRCLOUD_ACCESS_KEY}
       - ACRCLOUD_ACCESS_SECRET=${ACRCLOUD_ACCESS_SECRET}
+      - PYTHONUNBUFFERED=1
     restart: unless-stopped
     logging:
       driver: "json-file"
