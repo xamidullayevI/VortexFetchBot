@@ -7,14 +7,15 @@ from ..acrcloud_recognizer import extract_audio_from_video, get_music_info
 from ..utils import ensure_downloads_dir, cleanup_file, generate_temp_filename, format_duration
 from ..services.rate_limiter import RateLimiter
 from ..services.monitoring import metrics
+from ..config.config import config
 
 logger = logging.getLogger(__name__)
 
-# Audio rate limiter - alohida cheklovlar bilan
+# Audio rate limiter
 audio_rate_limiter = RateLimiter(
-    max_requests=20,      # Har bir foydalanuvchi uchun minutiga 20 ta audio so'rov
-    time_window=60,       # 1 daqiqa vaqt oralig'i
-    max_file_size_mb=100  # Audio uchun maksimal fayl hajmi
+    max_requests=config.max_audio_requests_per_minute,
+    time_window=60,
+    max_file_size_mb=100
 )
 
 async def extract_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -34,10 +35,13 @@ async def extract_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Rate limitni tekshirish
     user_id = update.effective_user.id
-    if not audio_rate_limiter.can_process(user_id):
-        await query.edit_message_text(
+    file_size = os.path.getsize(video_path)
+    
+    if not audio_rate_limiter.can_process(user_id, file_size):
+        await query.answer(
             "⚠️ Siz juda ko'p audio so'rov yubordingiz. "
-            "Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring."
+            "Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring.",
+            show_alert=True
         )
         return
     
@@ -45,10 +49,15 @@ async def extract_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_reply_markup(reply_markup=None)
         status = await query.message.reply_text("⏳ Audio ajratilmoqda...")
         
-        audio_path = extract_audio_from_video(video_path)
+        # Generate unique output path
+        audio_path = generate_temp_filename(prefix="audio_", suffix=".mp3")
+        audio_path = await extract_audio_from_video(video_path, audio_path)
         
         if not audio_path or not os.path.exists(audio_path):
-            await status.edit_text("❌ Audio ajratishda xatolik yuz berdi.")
+            await status.edit_text(
+                "❌ Audio ajratishda xatolik yuz berdi.\n"
+                "Video formati qo'llab-quvvatlanmasligi mumkin."
+            )
             return
         
         # Fayl hajmini tekshirish
@@ -61,21 +70,37 @@ async def extract_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
             
         # Audio faylni yuborish
-        with open(audio_path, 'rb') as audio_file:
-            await query.message.reply_audio(
-                audio_file,
-                caption="🎵 Musiqa formatida yuklab olindi",
-                filename=os.path.basename(audio_path)
+        try:
+            with open(audio_path, 'rb') as audio_file:
+                original_filename = os.path.basename(video_path)
+                audio_filename = f"{os.path.splitext(original_filename)[0]}.mp3"
+                
+                await query.message.reply_audio(
+                    audio=audio_file,
+                    caption="🎵 Musiqa formatida yuklab olindi",
+                    filename=audio_filename,
+                    duration=None  # FFprobe orqali aniqlanadi
+                )
+            
+            await status.delete()
+            metrics.track_successful_audio_extraction()
+            
+        except Exception as e:
+            logger.error(f"Audio yuborishda xatolik: {e}")
+            await status.edit_text(
+                "❌ Audio yuborishda xatolik yuz berdi.\n"
+                "Fayl hajmi juda katta bo'lishi mumkin."
             )
-        
-        await status.delete()
-        metrics.track_successful_audio_extraction()
         
     except Exception as e:
         logger.error(f"Audio ajratishda xatolik: {e}")
-        await status.edit_text("❌ Audio ajratishda xatolik yuz berdi")
+        await status.edit_text(
+            "❌ Audio ajratishda xatolik yuz berdi.\n"
+            "Iltimos, boshqa video bilan urinib ko'ring."
+        )
         # Xatolik bo'lsa rate limitni oshirmaslik
         audio_rate_limiter.user_limits[user_id].count -= 1
+        
     finally:
         cleanup_file(audio_path)
         await query.answer()
@@ -98,22 +123,32 @@ async def find_original(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Rate limitni tekshirish
     user_id = update.effective_user.id
     if not audio_rate_limiter.can_process(user_id):
-        await query.edit_message_text(
+        await query.answer(
             "⚠️ Siz juda ko'p qo'shiq aniqlash so'rovlarini yubordingiz. "
-            "Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring."
+            "Iltimos, bir necha daqiqadan keyin qayta urinib ko'ring.",
+            show_alert=True
         )
         return
     
     try:
         await query.edit_message_reply_markup(reply_markup=None)
-        status = await query.message.reply_text("🔍 Qo'shiq aniqlanmoqda...")
+        status = await query.message.reply_text(
+            "🔍 Qo'shiq aniqlanmoqda...\n"
+            "Bu bir necha soniya vaqt olishi mumkin."
+        )
         
-        audio_path = extract_audio_from_video(video_path)
+        # Vaqtinchalik audio fayl
+        audio_path = generate_temp_filename(prefix="music_", suffix=".mp3")
+        audio_path = await extract_audio_from_video(video_path, audio_path)
+        
         if not audio_path:
-            await status.edit_text("❌ Audio ajratishda xatolik yuz berdi.")
+            await status.edit_text(
+                "❌ Audio ajratishda xatolik yuz berdi.\n"
+                "Video formati qo'llab-quvvatlanmasligi mumkin."
+            )
             return
         
-        result = get_music_info(audio_path)
+        result = await get_music_info(audio_path)
         
         if result:
             # Natijani chiroyli formatda ko'rsatish
@@ -154,14 +189,22 @@ async def find_original(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=keyboard
             )
             metrics.track_successful_music_recognition()
+            
         else:
-            await status.edit_text("❌ Kechirasiz, qo'shiq aniqlanmadi")
+            await status.edit_text(
+                "❌ Kechirasiz, qo'shiq aniqlanmadi.\n"
+                "Video musiqa emasligi yoki sifati pastligi sabab bo'lishi mumkin."
+            )
             
     except Exception as e:
         logger.error(f"Qo'shiqni aniqlashda xatolik: {e}")
-        await status.edit_text("❌ Qo'shiqni aniqlashda xatolik yuz berdi")
+        await status.edit_text(
+            "❌ Qo'shiqni aniqlashda xatolik yuz berdi.\n"
+            "Iltimos, keyinroq qayta urinib ko'ring."
+        )
         # Xatolik bo'lsa rate limitni oshirmaslik
         audio_rate_limiter.user_limits[user_id].count -= 1
+        
     finally:
         cleanup_file(audio_path)
         await query.answer()

@@ -20,10 +20,16 @@ class BotConfig:
     # Video settings
     max_video_size_mb: int = 450  # Railway limit
     target_video_size_mb: int = 45  # Telegram limit
+    max_video_height: int = 720  # Default max height for compression
+    
+    # Audio settings
+    max_audio_size_mb: int = 50  # Telegram limit for audio files
+    audio_bitrate: int = 192  # Default audio bitrate in kbps
     
     # Rate limiting
     max_requests_per_minute: int = 30
     max_audio_requests_per_minute: int = 20
+    max_total_size_per_hour_mb: int = 1024  # 1GB per hour per user
 
     @classmethod
     def load(cls) -> 'BotConfig':
@@ -37,7 +43,7 @@ class BotConfig:
         admin_ids = [int(id_str) for id_str in admin_ids_str.split(",") if id_str.strip()]
 
         # Set up downloads directory
-        downloads_dir = Path("downloads")
+        downloads_dir = Path(os.getenv("DOWNLOAD_DIR", "downloads"))
         downloads_dir.mkdir(exist_ok=True)
 
         return cls(
@@ -51,8 +57,12 @@ class BotConfig:
             cleanup_interval=int(os.getenv("CLEANUP_INTERVAL_SECONDS", "300")),
             max_video_size_mb=int(os.getenv("MAX_VIDEO_SIZE_MB", "450")),
             target_video_size_mb=int(os.getenv("TARGET_VIDEO_SIZE_MB", "45")),
+            max_video_height=int(os.getenv("MAX_VIDEO_HEIGHT", "720")),
+            max_audio_size_mb=int(os.getenv("MAX_AUDIO_SIZE_MB", "50")),
+            audio_bitrate=int(os.getenv("AUDIO_BITRATE", "192")),
             max_requests_per_minute=int(os.getenv("MAX_REQUESTS_PER_MINUTE", "30")),
-            max_audio_requests_per_minute=int(os.getenv("MAX_AUDIO_REQUESTS_PER_MINUTE", "20"))
+            max_audio_requests_per_minute=int(os.getenv("MAX_AUDIO_REQUESTS_PER_MINUTE", "20")),
+            max_total_size_per_hour_mb=int(os.getenv("MAX_TOTAL_SIZE_PER_HOUR_MB", "1024"))
         )
 
 # Global config instance

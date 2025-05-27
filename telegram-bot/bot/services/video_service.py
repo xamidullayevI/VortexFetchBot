@@ -5,6 +5,7 @@ import psutil
 import asyncio
 from typing import Dict, Any, Optional
 from pathlib import Path
+from telegram import Bot, InlineKeyboardMarkup
 
 from ..downloader import download_video_with_info, DownloadError
 from ..video_compress import compress_video
@@ -152,3 +153,53 @@ class VideoService:
         """Vaqtinchalik fayllarni tozalash"""
         for file_path in file_paths:
             cleanup_file(file_path)
+
+    async def compress_and_send_video(
+        self,
+        video_path: str,
+        chat_id: int,
+        bot: Bot,
+        caption: str,
+        reply_markup: Optional[InlineKeyboardMarkup] = None
+    ) -> bool:
+        """Compress video and send it to chat"""
+        try:
+            # Generate path for compressed video
+            compressed_path = generate_temp_filename(prefix="compressed_", suffix=".mp4")
+            
+            # Try compressing the video
+            compressed_result = await compress_video(
+                video_path,
+                compressed_path,
+                target_size_mb=config.target_video_size_mb,
+                max_height=config.max_video_height
+            )
+            
+            if not compressed_result or not os.path.exists(compressed_result):
+                logger.error("Video compression failed")
+                return False
+
+            # Send compressed video
+            try:
+                with open(compressed_result, 'rb') as video_file:
+                    await bot.send_video(
+                        chat_id=chat_id,
+                        video=video_file,
+                        caption=caption,
+                        reply_markup=reply_markup,
+                        supports_streaming=True
+                    )
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error sending compressed video: {e}")
+                return False
+                
+            finally:
+                # Clean up compressed video
+                cleanup_file(compressed_result)
+                
+        except Exception as e:
+            logger.error(f"Error in compress_and_send_video: {e}")
+            metrics.track_error(type(e).__name__)
+            return False

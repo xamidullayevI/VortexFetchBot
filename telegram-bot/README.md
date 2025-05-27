@@ -9,6 +9,8 @@ Ko'plab platformalardan video yuklash imkoniyatiga ega Telegram bot.
 - Videodagi musiqani aniqlash (ACRCloud orqali)
 - Katta hajmli videolarni avtomatik siqish
 - Spotify va Apple Music havolalari bilan qo'shiqlar haqida ma'lumot
+- Rate limiting va foydalanuvchilarni boshqarish
+- Admin boshqaruv buyruqlari
 
 ## 🚂 Railway'da Deployment Qilish
 
@@ -20,12 +22,36 @@ Ko'plab platformalardan video yuklash imkoniyatiga ega Telegram bot.
 
 4. Environment o'zgaruvchilarini sozlang:
    ```env
+   # Asosiy sozlamalar
    TELEGRAM_BOT_TOKEN=your_bot_token
+   ADMIN_IDS=your_telegram_id
+   PORT=8080
+   LOG_LEVEL=INFO
+
+   # ACRCloud sozlamalari
    ACRCLOUD_HOST=your_acrcloud_host
    ACRCLOUD_ACCESS_KEY=your_acrcloud_access_key
    ACRCLOUD_ACCESS_SECRET=your_acrcloud_access_secret
-   ADMIN_IDS=your_telegram_id
+
+   # Xotira sozlamalari
    MAX_FILE_AGE_HOURS=1
+   MAX_DISK_PERCENT=80
+   MAX_MEMORY_PERCENT=85
+   CLEANUP_INTERVAL_SECONDS=300
+
+   # Video sozlamalari
+   MAX_VIDEO_SIZE_MB=450
+   TARGET_VIDEO_SIZE_MB=45
+   MAX_VIDEO_HEIGHT=720
+
+   # Audio sozlamalari
+   MAX_AUDIO_SIZE_MB=50
+   AUDIO_BITRATE=192
+
+   # Rate limiting
+   MAX_REQUESTS_PER_MINUTE=30
+   MAX_AUDIO_REQUESTS_PER_MINUTE=20
+   MAX_TOTAL_SIZE_PER_HOUR_MB=1024
    ```
 
 5. Railway avtomatik ravishda botni deploy qiladi
@@ -65,34 +91,30 @@ pip install -r requirements.txt
 - Linux: `sudo apt-get install ffmpeg`
 - Mac: `brew install ffmpeg`
 
-5. `.env` faylini sozlash:
-```env
-TELEGRAM_BOT_TOKEN=your_bot_token
-ACRCLOUD_HOST=your_acrcloud_host
-ACRCLOUD_ACCESS_KEY=your_acrcloud_access_key
-ACRCLOUD_ACCESS_SECRET=your_acrcloud_access_secret
-ADMIN_IDS=your_telegram_id
-```
+5. `.env` faylini `.env.example` asosida sozlash
 
-## 🚀 Ishga Tushirish
+## 📝 Bot Buyruqlari
 
-```bash
-python main.py
-```
+### Umumiy Foydalanuvchilar Uchun
+- `/start` - Botni ishga tushirish
+- `/help` - Yordam xabarini ko'rish
+- Video havolasini yuborish - Videoni yuklab olish
 
-## 📝 Konfiguratsiya
+### Admin Buyruqlari
+- `/stats` - Bot statistikasini ko'rish
+- `/admin` - Admin boshqaruv paneli:
+  - `block <user_id> [duration]` - Foydalanuvchini bloklash
+  - `unblock <user_id>` - Blokdan chiqarish
+  - `reset <user_id>` - Foydalanuvchi cheklovlarini qayta o'rnatish
+  - `stats <user_id>` - Foydalanuvchi statistikasini ko'rish
 
-### Telegram Bot Token olish
-1. [@BotFather](https://t.me/BotFather) ga boring
-2. `/newbot` buyrug'ini yuboring
-3. Bot nomini va username'ini kiriting
-4. Olingan tokenni `.env` fayliga saqlang
-
-### ACRCloud kredensiallarini olish
-1. [ACRCloud](https://www.acrcloud.com/) ga ro'yxatdan o'ting
-2. Yangi proyekt yarating
-3. Audio Recognition uchun kredensiallarni oling
-4. Olingan ma'lumotlarni `.env` fayliga saqlang
+### Rate Limiting
+- Har bir foydalanuvchi uchun:
+  - 30 ta so'rov minutiga
+  - 20 ta audio so'rov minutiga
+  - 1GB umumiy hajm soatiga
+- Video hajmi: maksimum 450MB
+- Audio hajmi: maksimum 50MB
 
 ## 🔧 Xatoliklarni Tuzatish
 
@@ -112,6 +134,11 @@ python main.py
    - Xotira yetishmovchiligi: `/stats` buyrug'i orqali tekshiring
    - Bot javob bermasa: Health check endpoint orqali tekshiring
    - Deployment xatoligi: Railway logs'larini tekshiring
+
+5. **Rate Limiting xatoliklari**:
+   - Foydalanuvchi bloklangan: `/admin stats <user_id>` orqali tekshiring
+   - So'rovlar soni oshgan: Bir necha daqiqa kutish kerak
+   - Xotira limiti oshgan: Bir soat kutish kerak
 
 ## 📄 Litsenziya
 

@@ -3,168 +3,173 @@ import time
 import hmac
 import base64
 import hashlib
-import requests
-import subprocess
 import logging
 import asyncio
-import acrcloud.acrcloud_extr_tool
-from dotenv import load_dotenv
-from typing import Dict, Optional
-from .services.monitoring import metrics
+import aiohttp
+from typing import Dict, Optional, Any
+from pathlib import Path
 
-load_dotenv()
+from .utils import run_command
+from .services.monitoring import metrics
+from .config.config import config
 
 logger = logging.getLogger(__name__)
 
-# ACRCloud credentials from environment variables
-ACR_HOST = os.getenv('ACRCLOUD_HOST')
-ACR_ACCESS_KEY = os.getenv('ACRCLOUD_ACCESS_KEY')
-ACR_ACCESS_SECRET = os.getenv('ACRCLOUD_ACCESS_SECRET')
+async def extract_audio_from_video(video_path: str, output_path: Optional[str] = None) -> Optional[str]:
+    """Extract audio from video file"""
+    try:
+        if not os.path.exists(video_path):
+            logger.error(f"Video file not found: {video_path}")
+            return None
 
-def extract_audio_from_video(video_path: str, audio_path: str = None) -> str:
-    """
-    Videodan audio (mp3) ajratib beradi. Agar audio_path berilmasa, avtomatik nom beradi.
-    """
-    if audio_path is None:
-        audio_path = video_path + ".mp3"
-    subprocess.run([
-        'ffmpeg', '-y', '-i', video_path, '-vn', '-acodec', 'mp3', audio_path
-    ], check=True)
-    return audio_path
+        if output_path is None:
+            output_path = str(Path(video_path).with_suffix('.mp3'))
 
+        cmd = [
+            'ffmpeg',
+            '-i', video_path,
+            '-vn',  # Disable video
+            '-acodec', 'libmp3lame',
+            '-ab', '192k',
+            '-ar', '44100',
+            '-y',  # Overwrite output file
+            output_path
+        ]
 
-def get_music_info(audio_file):
-    host = os.getenv("ACRCLOUD_HOST")
-    access_key = os.getenv("ACRCLOUD_ACCESS_KEY")
-    access_secret = os.getenv("ACRCLOUD_ACCESS_SECRET")
+        returncode, stdout, stderr = await run_command(cmd)
 
-    if not all([host, access_key, access_secret]):
+        if returncode != 0:
+            logger.error(f"FFmpeg error: {stderr.decode()}")
+            return None
+
+        if not os.path.exists(output_path):
+            logger.error("Audio file was not created")
+            return None
+
+        return output_path
+
+    except Exception as e:
+        logger.error(f"Error extracting audio: {e}")
+        metrics.track_error(type(e).__name__)
         return None
 
-    http_method = "POST"
-    http_uri = "/v1/identify"
-    data_type = "audio"
-    signature_version = "1"
-    timestamp = time.time()
-
-    string_to_sign = '\n'.join([
-        http_method,
-        http_uri,
-        access_key,
-        data_type,
-        signature_version,
-        str(timestamp)
-    ])
-
-    sign = base64.b64encode(
-        hmac.new(access_secret.encode('ascii'), string_to_sign.encode('ascii'),
-                 digestmod=hashlib.sha1).digest()
-    ).decode('ascii')
-
-    with open(audio_file, 'rb') as f:
-        files = {'sample': f}
-        data = {
-            'access_key': access_key,
-            'data_type': data_type,
-            'signature_version': signature_version,
-            'signature': sign,
-            'timestamp': str(timestamp),
-        }
-        
-        r = requests.post(f'https://{host}{http_uri}', files=files, data=data)
-        r.raise_for_status()
-        result = r.json()
-        
-        if 'status' in result and result['status']['code'] == 0 and 'metadata' in result and 'music' in result['metadata'] and result['metadata']['music']:
-            music_info = result['metadata']['music'][0]
-            return {
-                'title': music_info.get('title', 'Unknown'),
-                'artist': music_info.get('artists', [{'name': 'Unknown'}])[0]['name'],
-                'album': music_info.get('album', {}).get('name', 'Unknown'),
-                'release_date': music_info.get('release_date', 'Unknown'),
-                'external_metadata': music_info.get('external_metadata', {})
-            }
-    return None
-
-
-async def recognize_music(audio_path: str) -> Optional[Dict]:
+async def get_music_info(audio_file: str) -> Optional[Dict[str, Any]]:
     """
-    Recognize music using ACRCloud service
+    Recognize music using ACRCloud API
     Returns dict with music info or None if not found/error
     """
     try:
-        if not all([ACR_HOST, ACR_ACCESS_KEY, ACR_ACCESS_SECRET]):
+        # Check ACRCloud credentials
+        host = os.getenv("ACRCLOUD_HOST")
+        access_key = os.getenv("ACRCLOUD_ACCESS_KEY")
+        access_secret = os.getenv("ACRCLOUD_ACCESS_SECRET")
+
+        if not all([host, access_key, access_secret]):
             logger.error("ACRCloud credentials not configured")
             return None
 
-        config = {
-            'host': ACR_HOST,
-            'access_key': ACR_ACCESS_KEY,
-            'access_secret': ACR_ACCESS_SECRET,
-            'debug': False,
-            'timeout': 10
-        }
+        # Prepare request parameters
+        http_method = "POST"
+        http_uri = "/v1/identify"
+        data_type = "audio"
+        signature_version = "1"
+        timestamp = str(int(time.time()))
 
-        # Create recognizer
-        client = acrcloud.acrcloud_extr_tool.ExtrTool(config)
+        string_to_sign = "\n".join([
+            http_method,
+            http_uri,
+            access_key,
+            data_type,
+            signature_version,
+            timestamp
+        ])
 
-        # Run recognition in executor to avoid blocking
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            client.recognize_by_file,
-            audio_path,
-            0,  # Start time offset
-            10   # Duration to analyze (seconds)
-        )
+        sign = base64.b64encode(
+            hmac.new(
+                access_secret.encode('ascii'),
+                string_to_sign.encode('ascii'),
+                digestmod=hashlib.sha1
+            ).digest()
+        ).decode('ascii')
 
-        if not result or 'status' not in result or result['status']['code'] != 0:
-            logger.info("No music found or error in recognition")
-            return None
+        # Read audio file in chunks to avoid memory issues
+        sample_bytes = b''
+        max_size = 10 * 1024 * 1024  # 10MB max for recognition
+        with open(audio_file, 'rb') as f:
+            sample_bytes = f.read(max_size)
 
-        music = result.get('metadata', {}).get('music', [])
-        if not music:
-            logger.info("No music metadata found")
-            return None
+        # Prepare form data
+        data = aiohttp.FormData()
+        data.add_field('access_key', access_key)
+        data.add_field('data_type', data_type)
+        data.add_field('signature', sign)
+        data.add_field('signature_version', signature_version)
+        data.add_field('timestamp', timestamp)
+        data.add_field('sample', sample_bytes, filename='sample.mp3')
 
-        # Get first match
-        track = music[0]
-        
-        # Format response
-        response = {
-            'title': track.get('title', 'Unknown Title'),
-            'artist': track.get('artists', [{'name': 'Unknown Artist'}])[0]['name'],
-            'album': track.get('album', {}).get('name', 'Unknown Album'),
-            'release_date': track.get('release_date', 'Unknown Date'),
-            'score': track.get('score', 0)
-        }
+        # Make async request
+        timeout = aiohttp.ClientTimeout(total=30)  # 30 second timeout
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(f'https://{host}{http_uri}', data=data) as response:
+                if response.status != 200:
+                    logger.error(f"ACRCloud API error: {response.status}")
+                    return None
 
-        # Add streaming links if available
-        external_metadata = track.get('external_metadata', {})
-        
-        if 'spotify' in external_metadata:
-            spotify = external_metadata['spotify']
-            response['spotify'] = f"https://open.spotify.com/track/{spotify['track']['id']}"
-            
-        if 'apple_music' in external_metadata:
-            response['apple_music'] = external_metadata['apple_music'].get('url')
+                result = await response.json()
 
-        metrics.track_successful_music_recognition()
-        return response
+                if (result.get('status', {}).get('code') == 0 and
+                    'metadata' in result and
+                    'music' in result['metadata'] and
+                    result['metadata']['music']):
+                    
+                    music = result['metadata']['music'][0]
+                    
+                    # Format response
+                    response_data = {
+                        'title': music.get('title', 'Unknown'),
+                        'artist': music.get('artists', [{'name': 'Unknown'}])[0]['name'],
+                        'album': music.get('album', {}).get('name', 'Unknown'),
+                        'release_date': music.get('release_date', 'Unknown'),
+                        'score': music.get('score', 0),
+                        'external_metadata': music.get('external_metadata', {})
+                    }
+
+                    # Add duration if available
+                    duration = music.get('duration_ms')
+                    if duration:
+                        response_data['duration'] = duration / 1000  # Convert to seconds
+
+                    metrics.track_successful_music_recognition()
+                    return response_data
+
+        return None
 
     except Exception as e:
         logger.error(f"Error in music recognition: {e}")
         metrics.track_error(type(e).__name__)
         return None
 
+async def get_music_info_from_video(video_path: str) -> Optional[Dict[str, Any]]:
+    """Extract audio from video and recognize music"""
+    try:
+        # Extract audio to temporary file
+        audio_path = await extract_audio_from_video(video_path)
+        if not audio_path:
+            return None
 
-def get_music_info_from_video(video_path: str) -> dict:
-    """
-    Videodan audio ajratib, ACRCloud orqali original musiqani aniqlaydi.
-    """
-    audio_path = extract_audio_from_video(video_path)
-    result = get_music_info(audio_path)
-    # Vaqtinchalik audio faylni tozalash
-    if os.path.exists(audio_path):
-        os.remove(audio_path)
-    return result
+        try:
+            # Recognize music
+            result = await get_music_info(audio_path)
+            return result
+        finally:
+            # Clean up temporary audio file
+            if os.path.exists(audio_path):
+                try:
+                    os.remove(audio_path)
+                except Exception as e:
+                    logger.error(f"Error removing temporary audio file: {e}")
+
+    except Exception as e:
+        logger.error(f"Error in get_music_info_from_video: {e}")
+        metrics.track_error(type(e).__name__)
+        return None

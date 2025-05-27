@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
 # Import handlers
-from bot.handlers.base_handlers import start_command, help_command, stats_command
+from bot.handlers.base_handlers import start_command, help_command, stats_command, admin_command
 from bot.handlers.media_handlers import handle_media_message
 from bot.handlers.audio_handlers import extract_audio, find_original
 
@@ -53,7 +53,12 @@ async def main():
 
         # Configure bot with higher timeouts for Railway
         from telegram.request import HTTPXRequest
-        request = HTTPXRequest(read_timeout=300, connect_timeout=60)
+        request = HTTPXRequest(
+            read_timeout=300,
+            write_timeout=300,
+            connect_timeout=60,
+            pool_timeout=120
+        )
         
         # Initialize bot application
         application = (
@@ -67,6 +72,7 @@ async def main():
         application.add_handler(CommandHandler("start", start_command))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("stats", stats_command))
+        application.add_handler(CommandHandler("admin", admin_command))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_media_message))
         application.add_handler(CallbackQueryHandler(extract_audio, pattern=r"^get_audio:"))
         application.add_handler(CallbackQueryHandler(find_original, pattern=r"^find_original:"))
@@ -75,9 +81,22 @@ async def main():
         async def error_handler(update, context):
             logger.error(f"Update {update} caused error {context.error}")
             metrics.track_error(type(context.error).__name__)
+            
+            error_message = "❌ Bot ishlashida xatolik yuz berdi."
+            
+            if str(context.error).startswith("HTTP"):
+                error_message = "❌ Telegram serveriga ulanishda xatolik. Iltimos, keyinroq urinib ko'ring."
+            elif "Timed out" in str(context.error):
+                error_message = "⌛️ So'rov vaqti tugadi. Video hajmi juda katta bo'lishi mumkin."
+            elif "FILE_PARTS_INVALID" in str(context.error):
+                error_message = "❌ Fayl hajmi juda katta (50MB dan oshmasligi kerak)."
+            elif "FILE_REFERENCE_EXPIRED" in str(context.error):
+                error_message = "❌ Fayl muddati tugagan. Iltimos, qaytadan yuklang."
+            
             if update and update.effective_message:
                 await update.effective_message.reply_text(
-                    "❌ Bot ishlashida xatolik yuz berdi. Iltimos, keyinroq qayta urinib ko'ring."
+                    f"{error_message}\n\n"
+                    "Qayta urinib ko'ring yoki /help buyrug'i orqali yordam oling."
                 )
 
         application.add_error_handler(error_handler)
@@ -89,7 +108,14 @@ async def main():
         
         # Run bot until stopped
         logger.info("Bot is running...")
-        await application.run_polling()
+        await application.run_polling(
+            drop_pending_updates=True,
+            allowed_updates=[
+                "message",
+                "callback_query",
+                "my_chat_member"
+            ]
+        )
 
     except Exception as e:
         logger.error(f"Bot initialization error: {e}")
@@ -102,7 +128,10 @@ async def main():
         await cleanup_service.stop()
         await health_service.stop()
         await railway_service.stop()
-        await application.stop()
+        try:
+            await application.stop()
+        except:
+            pass
 
 if __name__ == "__main__":
     try:
