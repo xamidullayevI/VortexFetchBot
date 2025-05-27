@@ -75,11 +75,19 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stats command (admin only)"""
     if update.effective_chat:
         metrics.track_command("stats")
-        stats = metrics.get_stats()
+        stats = metrics.get_statistics()
         stats_text = f"""📊 Bot statistikasi:
-🔄 Yuklanishlar: {stats['downloads']}
-✅ Muvaffaqiyatli: {stats['successful']}
-❌ Xatoliklar: {stats['errors']}
-⚡️ So'nggi 24 soat: {stats['last_24h']}"""
+
+🔄 Jami yuklanishlar: {stats['total_downloads']}
+✅ Muvaffaqiyatli: {stats['successful_downloads']}
+❌ Xatoliklar: {stats['total_errors']}
+⚡️ So'nggi 24 soat: {stats['last_24h']}
+🎵 Audio ajratildi: {stats['audio_extractions']}
+🎼 Musiqa aniqlandi: {stats['music_recognitions']}
+
+💾 Tizim holati:
+CPU: {stats['system'].get('cpu_percent', 'N/A')}%
+RAM: {stats['system'].get('memory_percent', 'N/A')}%
+Disk: {stats['system'].get('disk_percent', 'N/A')}%"""
         
         await update.effective_message.reply_text(stats_text)

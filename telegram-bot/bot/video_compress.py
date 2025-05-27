@@ -2,8 +2,7 @@ import os
 import json
 import logging
 import asyncio
-import subprocess
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from pathlib import Path
 
 from .services.monitoring import metrics
@@ -113,7 +112,7 @@ async def compress_video(
             'ffmpeg',
             '-i', input_path,
             '-c:v', 'libx264',
-            '-preset', 'medium',
+            '-preset', 'medium',  # Balance between speed and compression
             '-b:v', f'{target_bitrate}',
             '-maxrate', f'{int(target_bitrate * 1.5)}',
             '-bufsize', f'{int(target_bitrate * 2)}',
@@ -151,50 +150,38 @@ async def compress_video(
                 
     return None
 
-async def extract_audio_from_video(video_path: str) -> str:
-    """Extract audio from video file using ffmpeg"""
+async def extract_audio(video_path: str, start_time: float = 0, duration: float = None) -> Optional[str]:
+    """Extract audio segment from video"""
     try:
-        video_path = Path(video_path)
-        if not video_path.exists():
-            logger.error(f"Video file not found: {video_path}")
-            return None
-            
-        # Create audio output path
-        audio_path = video_path.with_suffix('.mp3')
+        output_path = f"{video_path}.mp3"
+        cmd = ['ffmpeg', '-i', video_path]
         
-        # Construct ffmpeg command
-        cmd = [
-            'ffmpeg',
-            '-i', str(video_path),
-            '-vn',  # Disable video
+        if start_time > 0:
+            cmd.extend(['-ss', str(start_time)])
+            
+        if duration:
+            cmd.extend(['-t', str(duration)])
+            
+        cmd.extend([
+            '-vn',
             '-acodec', 'libmp3lame',
             '-ab', '192k',
             '-ar', '44100',
-            '-y',  # Overwrite output file
-            str(audio_path)
-        ]
+            '-y',
+            output_path
+        ])
         
-        # Run ffmpeg command
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        returncode, stdout, stderr = await run_command(cmd)
         
-        stdout, stderr = await process.communicate()
-        
-        if process.returncode != 0:
-            logger.error(f"FFmpeg error: {stderr.decode()}")
-            metrics.track_error("FFmpegError")
+        if returncode != 0:
+            logger.error(f"Error extracting audio: {stderr.decode()}")
             return None
             
-        if not audio_path.exists():
-            logger.error("Audio file was not created")
-            return None
+        if os.path.exists(output_path):
+            return output_path
             
-        return str(audio_path)
-        
     except Exception as e:
-        logger.error(f"Error extracting audio: {e}")
+        logger.error(f"Error in extract_audio: {e}")
         metrics.track_error(type(e).__name__)
-        return None
+        
+    return None

@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict
 from dataclasses import dataclass, field
 from datetime import datetime
 from collections import defaultdict
+from ..config.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -16,18 +17,44 @@ class MetricsCollector:
     process_times: Dict[str, float] = field(default_factory=dict)
     error_counts: Dict[str, int] = field(default_factory=dict)
     total_downloads: int = 0
+    successful_downloads: int = 0
     total_errors: int = 0
     start_time: datetime = field(default_factory=datetime.now)
+    commands: Dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    recent_downloads: list = field(default_factory=list)
+    audio_extractions: int = 0
+    music_recognitions: int = 0
 
     def track_download(self, url: str, duration: float) -> None:
         """Video yuklab olish vaqtini kuzatish"""
         self.download_times[url] = duration
         self.total_downloads += 1
+        self.recent_downloads.append(time.time())
+        # 24 soatdan eski ma'lumotlarni tozalash
+        current_time = time.time()
+        self.recent_downloads = [t for t in self.recent_downloads 
+                               if current_time - t < 24 * 3600]
+
+    def track_successful_download(self, url: str) -> None:
+        """Muvaffaqiyatli yuklab olishni qayd qilish"""
+        self.successful_downloads += 1
 
     def track_error(self, error_type: str) -> None:
         """Xatoliklarni kuzatish"""
         self.error_counts[error_type] = self.error_counts.get(error_type, 0) + 1
         self.total_errors += 1
+
+    def track_command(self, command: str) -> None:
+        """Bot buyruqlarini kuzatish"""
+        self.commands[command] += 1
+
+    def track_successful_audio_extraction(self) -> None:
+        """Audio ajratish muvaffaqiyatini kuzatish"""
+        self.audio_extractions += 1
+
+    def track_successful_music_recognition(self) -> None:
+        """Musiqa aniqlash muvaffaqiyatini kuzatish"""
+        self.music_recognitions += 1
 
     def get_statistics(self) -> Dict[str, Any]:
         """Bot ishlashi haqida statistika"""
@@ -40,7 +67,7 @@ class MetricsCollector:
         # Railway tizim ma'lumotlari
         try:
             memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('/')
+            disk = psutil.disk_usage(str(config.downloads_dir))
             cpu_percent = psutil.cpu_percent(interval=0.1)
 
             system_stats = {
@@ -56,76 +83,27 @@ class MetricsCollector:
             logger.error(f"Tizim ma'lumotlarini olishda xatolik: {e}")
             system_stats = {}
         
+        # So'nggi 24 soatdagi yuklab olishlar
+        current_time = time.time()
+        last_24h = len([t for t in self.recent_downloads 
+                       if current_time - t < 24 * 3600])
+
         return {
             "total_downloads": self.total_downloads,
+            "successful_downloads": self.successful_downloads,
             "total_errors": self.total_errors,
             "uptime_seconds": uptime,
             "average_download_time": avg_download_time,
             "error_distribution": dict(self.error_counts),
+            "commands": dict(self.commands),
+            "last_24h": last_24h,
+            "audio_extractions": self.audio_extractions,
+            "music_recognitions": self.music_recognitions,
             "system": system_stats
-        }
-
-class Metrics:
-    def __init__(self):
-        self.downloads = 0
-        self.successful = 0
-        self.errors = 0
-        self.error_types = defaultdict(int)
-        self.commands = defaultdict(int)
-        self.recent_downloads = []  # List of timestamps for last 24h stats
-        self.audio_extractions = 0
-        self.music_recognitions = 0
-
-    def track_download_attempt(self, url: str) -> None:
-        """Track a download attempt"""
-        self.downloads += 1
-        self.recent_downloads.append(time.time())
-        # Clean up old timestamps
-        current_time = time.time()
-        self.recent_downloads = [t for t in self.recent_downloads 
-                               if current_time - t < 24 * 3600]
-
-    def track_successful_download(self, url: str) -> None:
-        """Track a successful download"""
-        self.successful += 1
-
-    def track_error(self, error_type: str) -> None:
-        """Track an error"""
-        self.errors += 1
-        self.error_types[error_type] += 1
-
-    def track_command(self, command: str) -> None:
-        """Track command usage"""
-        self.commands[command] += 1
-
-    def track_successful_audio_extraction(self) -> None:
-        """Track successful audio extraction"""
-        self.audio_extractions += 1
-
-    def track_successful_music_recognition(self) -> None:
-        """Track successful music recognition"""
-        self.music_recognitions += 1
-
-    def get_stats(self) -> Dict[str, Any]:
-        """Get current statistics"""
-        current_time = time.time()
-        last_24h = len([t for t in self.recent_downloads 
-                       if current_time - t < 24 * 3600])
-        
-        return {
-            'downloads': self.downloads,
-            'successful': self.successful,
-            'errors': self.errors,
-            'error_types': dict(self.error_types),
-            'commands': dict(self.commands),
-            'last_24h': last_24h,
-            'audio_extractions': self.audio_extractions,
-            'music_recognitions': self.music_recognitions
         }
 
 # Global metrikalar obyekti
 metrics = MetricsCollector()
-metrics_v2 = Metrics()
 
 def monitor_performance(func: Callable) -> Callable:
     """Funksiya bajarilish vaqtini o'lchash uchun dekorator"""
@@ -150,7 +128,3 @@ def monitor_performance(func: Callable) -> Callable:
 def get_bot_statistics() -> Dict[str, Any]:
     """Bot ishlashi haqida umumiy statistika"""
     return metrics.get_statistics()
-
-def get_bot_statistics_v2() -> Dict[str, Any]:
-    """Bot ishlashi haqida umumiy statistika v2"""
-    return metrics_v2.get_stats()
