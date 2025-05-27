@@ -4,7 +4,7 @@ services:
   bot:
     build: .
     volumes:
-      - ./downloads:/app/downloads
+      - ./telegram-bot/downloads:/app/downloads
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - ACRCLOUD_HOST=${ACRCLOUD_HOST}
