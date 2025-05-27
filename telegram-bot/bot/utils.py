@@ -2,13 +2,14 @@ import re
 import os
 import logging
 import asyncio
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, Tuple
 from pathlib import Path
 from functools import wraps
 from datetime import datetime
 import uuid
 
 from bot.downloader import download_video_with_info, DownloadError
+from .config.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -18,46 +19,45 @@ def extract_url(text: str) -> Optional[str]:
     match = re.search(url_pattern, text)
     return match.group(0) if match else None
 
-def ensure_downloads_dir() -> Path:
+def ensure_downloads_dir() -> None:
     """Ensure downloads directory exists"""
-    downloads_dir = Path("downloads")
-    downloads_dir.mkdir(exist_ok=True)
-    return downloads_dir
+    os.makedirs(config.downloads_dir, exist_ok=True)
 
-def cleanup_file(filepath: str) -> None:
-    """Safely delete a file"""
-    try:
-        if filepath and os.path.exists(filepath):
-            os.remove(filepath)
-            logger.debug(f"Deleted file: {filepath}")
-    except Exception as e:
-        logger.error(f"Error cleaning up file {filepath}: {e}")
+def cleanup_file(file_path: str) -> None:
+    """Safely remove a file if it exists"""
+    if file_path and os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            logger.error(f"Error removing file {file_path}: {e}")
 
 def generate_temp_filename(prefix: str = "", suffix: str = "") -> str:
     """Generate temporary filename in downloads directory"""
-    downloads_dir = ensure_downloads_dir()
-    return str(downloads_dir / f"{prefix}{uuid.uuid4()}{suffix}")
+    filename = f"{prefix}{uuid.uuid4().hex}{suffix}"
+    return str(Path(config.downloads_dir) / filename)
 
-def format_size(size_bytes: int) -> str:
-    """Format file size to human readable format"""
+def format_size(size_in_bytes: int) -> str:
+    """Format file size in human readable format"""
     for unit in ['B', 'KB', 'MB', 'GB']:
-        if size_bytes < 1024:
-            return f"{size_bytes:.1f}{unit}"
-        size_bytes /= 1024
-    return f"{size_bytes:.1f}GB"
+        if size_in_bytes < 1024:
+            if unit == 'B':
+                return f"{size_in_bytes} {unit}"
+            return f"{size_in_bytes:.1f} {unit}"
+        size_in_bytes /= 1024
+    return f"{size_in_bytes:.1f} TB"
 
 def format_duration(seconds: float) -> str:
-    """Format duration in seconds to mm:ss or hh:mm:ss format"""
+    """Format duration in HH:MM:SS format"""
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
+    seconds = int(seconds % 60)
     
     if hours > 0:
-        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-    return f"{minutes:02d}:{secs:02d}"
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
 
-async def run_command(cmd: list) -> tuple:
-    """Run shell command asynchronously"""
+async def run_command(cmd: list) -> Tuple[int, bytes, bytes]:
+    """Run a command asynchronously and return returncode, stdout, stderr"""
     process = await asyncio.create_subprocess_exec(
         *cmd,
         stdout=asyncio.subprocess.PIPE,
@@ -160,4 +160,40 @@ async def check_url_access(url: str) -> bool:
                 return response.status == 200
     except Exception as e:
         logger.error(f"Error checking URL access: {e}")
+        return False
+
+def get_supported_sites() -> list:
+    """Get list of supported video platforms"""
+    return [
+        'YouTube',
+        'Instagram',
+        'TikTok',
+        'Facebook',
+        'Twitter',
+        'Vimeo',
+        'Dailymotion',
+        'VK',
+        'Twitch',
+        'SoundCloud'
+    ]
+
+def validate_url(url: str) -> bool:
+    """Check if URL is from a supported platform"""
+    supported_domains = [
+        'youtube.com', 'youtu.be',
+        'instagram.com',
+        'tiktok.com',
+        'facebook.com', 'fb.com', 'fb.watch',
+        'twitter.com', 't.co',
+        'vimeo.com',
+        'dailymotion.com',
+        'vk.com',
+        'twitch.tv',
+        'soundcloud.com'
+    ]
+    try:
+        from urllib.parse import urlparse
+        domain = urlparse(url).netloc.lower()
+        return any(site in domain for site in supported_domains)
+    except:
         return False

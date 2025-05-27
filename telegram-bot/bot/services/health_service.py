@@ -1,73 +1,152 @@
+import os
+import json
 import logging
 import asyncio
 from aiohttp import web
 from typing import Optional
+from datetime import datetime
 from ..services.monitoring import metrics
+from ..config.config import config
 
 logger = logging.getLogger(__name__)
 
 class HealthService:
-    def __init__(self, port: int = 8080):
-        self.port = port
-        self.app = web.Application()
-        self.app.router.add_get("/health", self.health_check)
-        self.app.router.add_get("/metrics", self.get_metrics)
-        self.runner: Optional[web.AppRunner] = None
-        self.site: Optional[web.TCPSite] = None
+    def __init__(self, port: int = None):
+        self.port = port or config.port
+        self.start_time = datetime.now()
+        self._app = web.Application()
+        self._app.router.add_get("/health", self.health_check)
+        self._app.router.add_get("/metrics", self.metrics_endpoint)
+        self._runner: Optional[web.AppRunner] = None
+        self._site: Optional[web.TCPSite] = None
 
     async def start(self):
         """Start the health check service"""
         try:
-            self.runner = web.AppRunner(self.app)
-            await self.runner.setup()
-            self.site = web.TCPSite(self.runner, '0.0.0.0', self.port)
-            await self.site.start()
-            logger.info(f"Health service started on port {self.port}")
+            self._runner = web.AppRunner(self._app)
+            await self._runner.setup()
+            self._site = web.TCPSite(
+                self._runner,
+                host="0.0.0.0",
+                port=self.port
+            )
+            await self._site.start()
+            logger.info(f"Health check service started on port {self.port}")
         except Exception as e:
-            logger.error(f"Failed to start health service: {e}")
+            logger.error(f"Failed to start health check service: {e}")
             metrics.track_error(type(e).__name__)
-            raise
 
     async def stop(self):
         """Stop the health check service"""
         try:
-            if self.site:
-                await self.site.stop()
-            if self.runner:
-                await self.runner.cleanup()
-            logger.info("Health service stopped")
+            if self._site:
+                await self._site.stop()
+            if self._runner:
+                await self._runner.cleanup()
+            logger.info("Health check service stopped")
         except Exception as e:
-            logger.error(f"Error stopping health service: {e}")
+            logger.error(f"Error stopping health check service: {e}")
             metrics.track_error(type(e).__name__)
 
     async def health_check(self, request: web.Request) -> web.Response:
-        """Handle health check requests"""
+        """Handle /health endpoint"""
         try:
-            # Basic health check - if we can respond, we're healthy
-            return web.json_response({
-                "status": "healthy",
-                "timestamp": asyncio.get_event_loop().time()
-            })
-        except Exception as e:
-            logger.error(f"Health check failed: {e}")
-            metrics.track_error(type(e).__name__)
-            return web.json_response({
-                "status": "unhealthy",
-                "error": str(e)
-            }, status=500)
+            import psutil
 
-    async def get_metrics(self, request: web.Request) -> web.Response:
-        """Return bot metrics"""
-        try:
-            stats = metrics.get_stats()
-            return web.json_response({
-                "status": "success",
-                "metrics": stats
-            })
+            # Get system stats
+            process = psutil.Process()
+            memory_info = process.memory_info()
+            cpu_percent = process.cpu_percent()
+            memory_percent = process.memory_percent()
+            
+            # Get disk usage for downloads directory
+            disk = psutil.disk_usage(str(config.downloads_dir))
+
+            # Prepare health check response
+            health_data = {
+                "status": "healthy",
+                "uptime": str(datetime.now() - self.start_time),
+                "system": {
+                    "cpu_percent": cpu_percent,
+                    "memory_used_mb": memory_info.rss / 1024 / 1024,
+                    "memory_percent": memory_percent,
+                    "disk_free_mb": disk.free / 1024 / 1024,
+                    "disk_percent": disk.percent
+                }
+            }
+
+            # Check resource thresholds
+            warnings = []
+            if cpu_percent > 80:
+                warnings.append("High CPU usage")
+            if memory_percent > config.max_memory_percent:
+                warnings.append("High memory usage")
+            if disk.percent > config.max_disk_percent:
+                warnings.append("Low disk space")
+
+            if warnings:
+                health_data["status"] = "warning"
+                health_data["warnings"] = warnings
+
+            return web.json_response(health_data)
+
         except Exception as e:
-            logger.error(f"Error getting metrics: {e}")
+            logger.error(f"Health check error: {e}")
             metrics.track_error(type(e).__name__)
             return web.json_response({
                 "status": "error",
                 "error": str(e)
             }, status=500)
+
+    async def metrics_endpoint(self, request: web.Request) -> web.Response:
+        """Handle /metrics endpoint"""
+        try:
+            # Get bot metrics
+            bot_stats = metrics.get_statistics()
+            
+            # Format metrics in Prometheus format
+            prometheus_metrics = []
+            
+            # Add download metrics
+            prometheus_metrics.extend([
+                f'# TYPE bot_downloads_total counter',
+                f'bot_downloads_total {bot_stats["total_downloads"]}',
+                f'# TYPE bot_downloads_success counter',
+                f'bot_downloads_success {bot_stats["successful_downloads"]}',
+                f'# TYPE bot_downloads_errors counter',
+                f'bot_downloads_errors {bot_stats["total_errors"]}'
+            ])
+            
+            # Add audio processing metrics
+            prometheus_metrics.extend([
+                f'# TYPE bot_audio_extractions counter',
+                f'bot_audio_extractions {bot_stats["audio_extractions"]}',
+                f'# TYPE bot_music_recognitions counter',
+                f'bot_music_recognitions {bot_stats["music_recognitions"]}'
+            ])
+            
+            # Add system metrics
+            system_stats = bot_stats.get("system", {})
+            if system_stats:
+                prometheus_metrics.extend([
+                    f'# TYPE bot_cpu_percent gauge',
+                    f'bot_cpu_percent {system_stats.get("cpu_percent", 0)}',
+                    f'# TYPE bot_memory_percent gauge',
+                    f'bot_memory_percent {system_stats.get("memory_percent", 0)}',
+                    f'# TYPE bot_disk_percent gauge',
+                    f'bot_disk_percent {system_stats.get("disk_percent", 0)}'
+                ])
+            
+            return web.Response(
+                text="\n".join(prometheus_metrics),
+                content_type="text/plain"
+            )
+            
+        except Exception as e:
+            logger.error(f"Metrics endpoint error: {e}")
+            metrics.track_error(type(e).__name__)
+            return web.Response(
+                text="# Error collecting metrics",
+                content_type="text/plain",
+                status=500
+            )
