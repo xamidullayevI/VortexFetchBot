@@ -2,7 +2,7 @@ python-telegram-bot==20.3
 python-dotenv==1.0.0
 yt-dlp==2023.11.16
 psutil==5.9.5
-aiohttp==3.8.5
+aiohttp==3.8.1
 ffmpeg-python==0.2.0
 requests==2.31.0
 pydub==0.25.1
