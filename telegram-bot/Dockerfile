@@ -5,9 +5,9 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     gcc \
     python3-dev \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
 # Install Python dependencies first
