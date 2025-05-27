@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  bot:
+    build: .
+    volumes:
+      - ./downloads:/app/downloads
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - ACRCLOUD_HOST=${ACRCLOUD_HOST}
+      - ACRCLOUD_ACCESS_KEY=${ACRCLOUD_ACCESS_KEY}
+      - ACRCLOUD_ACCESS_SECRET=${ACRCLOUD_ACCESS_SECRET}
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

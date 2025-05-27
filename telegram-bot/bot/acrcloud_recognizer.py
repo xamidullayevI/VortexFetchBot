@@ -4,6 +4,7 @@ import hmac
 import base64
 import hashlib
 import requests
+import subprocess
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,6 +25,9 @@ def get_music_info(audio_file):
     host = os.getenv("ACRCLOUD_HOST")
     access_key = os.getenv("ACRCLOUD_ACCESS_KEY")
     access_secret = os.getenv("ACRCLOUD_ACCESS_SECRET")
+
+    if not all([host, access_key, access_secret]):
+        return None
 
     http_method = "POST"
     http_uri = "/v1/identify"
@@ -59,7 +63,7 @@ def get_music_info(audio_file):
         r.raise_for_status()
         result = r.json()
         
-        if 'status' in result and result['status']['code'] == 0:
+        if 'status' in result and result['status']['code'] == 0 and 'metadata' in result and 'music' in result['metadata'] and result['metadata']['music']:
             music_info = result['metadata']['music'][0]
             return {
                 'title': music_info.get('title', 'Unknown'),
@@ -75,14 +79,9 @@ def get_music_info_from_video(video_path: str) -> dict:
     """
     Videodan audio ajratib, ACRCloud orqali original musiqani aniqlaydi.
     """
-    # Bu joyga o'zingizning project credential'laringizni joylashtiring:
-    host = "identify-ap-southeast-1.acrcloud.com"
-    access_key = "256a370f00f84d9f8d50829df46c2b7d"
-    access_secret = "c2VuUy9vYkZyqvgays3FqQdJrLsQk2yAbIjkmE8"
-
     audio_path = extract_audio_from_video(video_path)
-    result = recognize_audio_acrcloud(audio_path, host, access_key, access_secret)
-    # Agar kerak bo'lsa, vaqtinchalik audio faylni o'chirib yuborish mumkin
+    result = get_music_info(audio_path)
+    # Vaqtinchalik audio faylni tozalash
     if os.path.exists(audio_path):
         os.remove(audio_path)
     return result

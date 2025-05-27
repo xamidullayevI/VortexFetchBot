@@ -1,19 +1,46 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Env
+# Environment variables
 .env
 
-# Downloads
-/downloads/
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# System
-.DS_Store
-Thumbs.db
+# Virtual Environment
+venv/
+ENV/
 
 # IDE
-.vscode/
 .idea/
+.vscode/
+*.swp
+*.swo
+
+# Project specific
+downloads/
+*.mp4
+*.mp3
+*.part
+*.temp
+*.cookies
+cookies.txt
+
+# Logs
+*.log

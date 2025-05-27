@@ -1,120 +1,166 @@
 import os
 import uuid
-import requests
-from typing import Dict, Optional, Tuple
-from ..downloader import download_video, DownloadError
-from ..utils import universal_download
+import logging
+import psutil
+from typing import Dict, Any, Optional
+from pathlib import Path
+
+from ..downloader import download_video_with_info
 from ..video_compress import compress_video
+from ..utils import (
+    ensure_downloads_dir,
+    cleanup_file,
+    format_size,
+    format_duration,
+    generate_temp_filename
+)
+
+logger = logging.getLogger(__name__)
 
 class VideoService:
-    DOWNLOAD_DIR = "downloads"
-    MAX_TELEGRAM_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
+    MAX_TELEGRAM_SIZE = 49 * 1024 * 1024  # 49MB
+    COMPRESS_TARGET_SIZE = 45 * 1024 * 1024  # 45MB
+    RAILWAY_MAX_SIZE = 450 * 1024 * 1024  # 450MB - Railway disk limit
+    MEMORY_THRESHOLD = 80  # 80% memory usage threshold
 
-    @staticmethod
-    def get_network_name(url: str) -> str:
-        domains = {
-            'instagram.com': 'Instagram',
-            'youtube.com': 'YouTube',
-            'youtu.be': 'YouTube',
-            'tiktok.com': 'TikTok',
-            'facebook.com': 'Facebook',
-            'twitter.com': 'Twitter',
-            'x.com': 'Twitter',
-            'vk.com': 'VK',
-            'reddit.com': 'Reddit',
-            'vimeo.com': 'Vimeo',
-            'dailymotion.com': 'Dailymotion',
-            'likee.video': 'Likee',
-            'pinterest.com': 'Pinterest'
-        }
-        return next((name for domain, name in domains.items() if domain in url), 'Video')
+    def __init__(self):
+        self.downloads_dir = ensure_downloads_dir()
 
-    @classmethod
-    async def download_and_process_video(cls, url: str) -> Dict:
-        """Video yuklab olish va qayta ishlash uchun asosiy metod"""
+    async def download_and_process_video(self, url: str) -> Dict[str, Any]:
+        """Video yuklab olish va qayta ishlash"""
         try:
-            unique_id = str(uuid.uuid4())
-            video_path = os.path.join(cls.DOWNLOAD_DIR, f"video_{unique_id}.mp4")
-            compressed_path = os.path.join(cls.DOWNLOAD_DIR, f"video_{unique_id}_compressed.mp4")
+            # Xotira tekshiruvi
+            if not self._check_memory():
+                return {
+                    'success': False,
+                    'error': "❌ Serverda xotira yetarli emas. Iltimos, keyinroq urinib ko'ring."
+                }
 
-            # Universal yuklab olish
-            result = universal_download(url)
-            if not result or result.get('error'):
-                error_message = result.get('error_message', '❗ Media topilmadi yoki yuklab bo\'lmadi.') if result else '❗ Media topilmadi yoki yuklab bo\'lmadi.'
-                return {'success': False, 'error': error_message}
+            # Disk joy tekshiruvi
+            if not self._check_disk_space():
+                return {
+                    'success': False,
+                    'error': "❌ Serverda bo'sh joy yetarli emas. Iltimos, keyinroq urinib ko'ring."
+                }
 
-            video_path = result.get('download_url')
-            video_info = result.get('info')
-            if not video_path:
-                return {'success': False, 'error': '❗ Media topilmadi yoki yuklab bo\'lmadi. (download_url yo\'q)'}
+            # Unique ID yaratish
+            unique_id = uuid.uuid4().hex
+            
+            # Video yuklab olish
+            video_path, info = download_video_with_info(url, str(self.downloads_dir))
+            if not video_path or not os.path.exists(video_path):
+                return {
+                    'success': False,
+                    'error': "❌ Video yuklab olinmadi"
+                }
 
-            try:
-                file_size = os.path.getsize(video_path)
-            except Exception as e:
-                return {'success': False, 'error': f"❌ Fayl topilmadi yoki o'qib bo'lmadi: {str(e)}"}
+            file_size = os.path.getsize(video_path)
+            
+            # Railway xotira cheklovini tekshirish
+            if file_size > self.RAILWAY_MAX_SIZE:
+                cleanup_file(video_path)
+                return {
+                    'success': False,
+                    'error': "❌ Video hajmi juda katta (450MB dan oshmasligi kerak)"
+                }
 
-            network_name = cls.get_network_name(url)
-            video_title = video_info.get('title') if video_info else os.path.splitext(os.path.basename(video_path))[0]
+            # Xotira yetishmasligini oldini olish uchun katta videolarni avtomatik siqish
+            if file_size > self.COMPRESS_TARGET_SIZE or self._is_memory_critical():
+                needs_compression = True
+            else:
+                needs_compression = file_size > self.MAX_TELEGRAM_SIZE
 
-            # Fayl hajmi tekshiruvi
-            if file_size > cls.MAX_TELEGRAM_SIZE:
-                compressed_result = await cls.handle_large_file(video_path, compressed_path)
-                if not compressed_result['success']:
-                    return compressed_result
-                video_path = compressed_path
+            # Video ma'lumotlarini olish
+            duration = info.get('duration', 0)
+            title = info.get('title', 'Video')
+            uploader = info.get('uploader', 'Unknown')
 
+            # Caption tayyorlash
+            caption = (
+                f"📹 *{title}*\n"
+                f"👤 *Kanal:* {uploader}\n"
+                f"⏱ *Davomiyligi:* {format_duration(duration)}\n"
+                f"📦 *Hajmi:* {format_size(file_size)}"
+            )
+
+            # Agar video hajmi katta bo'lsa yoki xotira tanqis bo'lsa, siqish
+            if needs_compression:
+                compressed_path = generate_temp_filename(prefix="compressed_", suffix=".mp4")
+                target_size = min(45, max(20, self._get_optimal_target_size()))
+                
+                compressed_result = compress_video(
+                    video_path,
+                    compressed_path,
+                    target_size_mb=target_size
+                )
+                
+                if compressed_result:
+                    cleanup_file(video_path)
+                    video_path = compressed_result
+
+            # Natijani qaytarish
             return {
                 'success': True,
                 'video_path': video_path,
-                'caption': f"{network_name}: {video_title}",
-                'file_size': file_size,
+                'caption': caption,
                 'unique_id': unique_id,
-                'audio_url': result.get('audio_url'),
-                'media_type': result.get('media_type'),
-                'thumb': result.get('thumb'),
-                'info': result.get('info')
+                'audio_url': info.get('url'),
+                'info': info
             }
 
         except Exception as e:
-            return {'success': False, 'error': f"❌ Xatolik yuz berdi: {str(e)}"}
+            logger.error(f"Video qayta ishlashda xatolik: {e}")
+            return {
+                'success': False,
+                'error': f"❌ Xatolik yuz berdi: {str(e)}"
+            }
 
-    @classmethod
-    async def handle_large_file(cls, video_path: str, compressed_path: str) -> Dict:
-        """Katta hajmli fayllarni qayta ishlash"""
+    def _check_memory(self) -> bool:
+        """Xotira yetarliligini tekshirish"""
         try:
-            compress_video(video_path, compressed_path, target_size_mb=2000)
-            compressed_size = os.path.getsize(compressed_path)
-
-            if compressed_size > cls.MAX_TELEGRAM_SIZE:
-                return await cls.upload_to_external_host(compressed_path)
-
-            return {'success': True, 'video_path': compressed_path}
-
+            memory = psutil.virtual_memory()
+            return memory.percent < self.MEMORY_THRESHOLD
         except Exception as e:
-            return {'success': False, 'error': f"❌ Videoni siqishda xatolik: {str(e)}"}
+            logger.error(f"Xotirani tekshirishda xatolik: {e}")
+            return True
 
-    @staticmethod
-    async def upload_to_external_host(file_path: str) -> Dict:
-        """Faylni tashqi hostingga yuklash"""
+    def _is_memory_critical(self) -> bool:
+        """Xotira holati kritik ekanligini tekshirish"""
         try:
-            with open(file_path, 'rb') as f:
-                resp = requests.put('https://transfer.sh/video.mp4', data=f)
-            if resp.status_code == 200:
-                return {
-                    'success': True,
-                    'is_external': True,
-                    'download_url': resp.text.strip()
-                }
-            return {'success': False, 'error': "❌ Faylni tashqi hostingga yuklab bo'lmadi."}
+            memory = psutil.virtual_memory()
+            return memory.percent > 90
+        except Exception:
+            return False
+
+    def _get_optimal_target_size(self) -> int:
+        """Optimal siqish hajmini hisoblash"""
+        try:
+            memory = psutil.virtual_memory()
+            # Xotira bandligi qancha yuqori bo'lsa, shuncha ko'p siqish
+            if memory.percent > 85:
+                return 20  # 20MB gacha siqish
+            elif memory.percent > 75:
+                return 30  # 30MB gacha siqish
+            else:
+                return 45  # 45MB gacha siqish
+        except Exception:
+            return 45  # Xatolik bo'lsa default qiymat
+
+    def _check_disk_space(self) -> bool:
+        """Railway xotirasini tekshirish"""
+        try:
+            total_size = 0
+            for path in Path(self.downloads_dir).glob('**/*'):
+                if path.is_file():
+                    total_size += path.stat().st_size
+            
+            return total_size < (self.RAILWAY_MAX_SIZE * 0.9)  # 90% dan kam bo'lishi kerak
         except Exception as e:
-            return {'success': False, 'error': f"❌ Faylni tashqi hostingga yuklashda xatolik: {str(e)}"}
+            logger.error(f"Xotirani tekshirishda xatolik: {e}")
+            return False
 
     @staticmethod
     def cleanup_files(*file_paths: str) -> None:
         """Vaqtinchalik fayllarni tozalash"""
         for file_path in file_paths:
-            try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            except Exception:
-                pass
+            cleanup_file(file_path)

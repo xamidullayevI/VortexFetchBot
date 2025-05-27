@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+.github
+
+# Virtual environment
+venv/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Tests
+tests/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Project specific
+downloads/
+*.mp4
+*.mp3
+*.part
+*.temp
+*.cookies
+
+# Environment
+.env
+.env.example
+
+# Documentation
+README.md
+LICENSE
+
+# Logs
+*.log

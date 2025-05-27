@@ -1,7 +1,10 @@
-python-telegram-bot
-python-dotenv
-yt-dlp
-requests
-ffmpeg-python
-# boshqa kutubxonalarsoup4
-beautifulsoup4
+python-telegram-bot==20.3
+python-dotenv==1.0.0
+yt-dlp==2023.3.4
+requests==2.31.0
+ffmpeg-python==0.2.0
+beautifulsoup4==4.12.2
+psutil==5.9.5
+aiohttp==3.8.5
+pydub==0.25.1
+pillow==10.0.0
