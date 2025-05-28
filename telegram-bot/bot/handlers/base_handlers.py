@@ -2,13 +2,10 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from ..services.monitoring import metrics
 from ..config.config import config
-from ..services.rate_limiter import RateLimiter, audio_rate_limiter
+from ..services.rate_limiters import rate_limiter, audio_rate_limiter
 import logging
 
 logger = logging.getLogger(__name__)
-
-# Global rate limiter
-rate_limiter = RateLimiter()
 
 HELP_MESSAGE = """🤖 *Video Yuklovchi Bot*
 

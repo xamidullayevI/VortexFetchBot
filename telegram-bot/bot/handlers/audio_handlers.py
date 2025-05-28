@@ -6,18 +6,11 @@ from telegram.ext import ContextTypes
 from ..acrcloud_recognizer import extract_audio_from_video, get_music_info
 from ..utils import cleanup_file, format_duration
 from ..path_utils import generate_temp_filename
-from ..services.rate_limiter import RateLimiter
+from ..services.rate_limiters import audio_rate_limiter
 from ..services.monitoring import metrics
 from ..config.config import config
 
 logger = logging.getLogger(__name__)
-
-# Audio rate limiter
-audio_rate_limiter = RateLimiter(
-    max_requests=config.max_audio_requests_per_minute,
-    time_window=60,
-    max_file_size_mb=100
-)
 
 async def extract_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Video fayldan audio ajratib olish"""
