@@ -8,6 +8,7 @@ from pathlib import Path
 from .services.monitoring import metrics
 from .config.config import config
 from .utils import run_command
+from .path_utils import generate_temp_filename
 
 logger = logging.getLogger(__name__)
 

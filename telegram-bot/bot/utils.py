@@ -6,9 +6,7 @@ from typing import Optional, Any, Dict, Tuple
 from pathlib import Path
 from functools import wraps
 from datetime import datetime
-import uuid
 
-from bot.downloader import download_video_with_info, DownloadError
 from .config.config import config
 
 logger = logging.getLogger(__name__)
@@ -30,11 +28,6 @@ def cleanup_file(file_path: str) -> None:
             os.remove(file_path)
         except Exception as e:
             logger.error(f"Error removing file {file_path}: {e}")
-
-def generate_temp_filename(prefix: str = "", suffix: str = "") -> str:
-    """Generate temporary filename in downloads directory"""
-    filename = f"{prefix}{uuid.uuid4().hex}{suffix}"
-    return str(Path(config.downloads_dir) / filename)
 
 def format_size(size_in_bytes: int) -> str:
     """Format file size in human readable format"""
@@ -91,41 +84,6 @@ def safe_get(obj: Dict[str, Any], *keys: str, default: Any = None) -> Any:
 def is_video_url(text: str) -> bool:
     url_regex = re.compile(r"https?://[\w./?=&%-]+", re.IGNORECASE)
     return bool(url_regex.search(text))
-
-# Yangi universal_download: faqat yt-dlp asosida
-def universal_download(url, download_dir="downloads"):
-    try:
-        result = download_video_with_info(url, download_dir)
-        if not isinstance(result, tuple) or len(result) != 2:
-            print(f"[ERROR] download_video_with_info returned unexpected value: {result}")
-            return {
-                "error": True,
-                "error_message": "download_video_with_info noto'g'ri qiymat qaytardi (2 ta qiymat kutildi)",
-                "raw_result": result
-            }
-        video_path, info = result
-        audio_url = None
-        # Agar info dictda audio link bo‘lsa, uni ham qaytar
-        if info and 'requested_formats' in info:
-            for fmt in info['requested_formats']:
-                if fmt.get('acodec') != 'none' and fmt.get('url'):
-                    audio_url = fmt['url']
-                    break
-        return {
-            "download_url": video_path,
-            "audio_url": audio_url,
-            "media_type": info.get('ext') if info else None,
-            "thumb": info.get('thumbnail') if info else None,
-            "info": info,
-            "method": "ytdlp",
-            "error": False
-        }
-    except DownloadError as e:
-        print(f"[ERROR] yt-dlp xatolik: {e}")
-        return {
-            "error": True,
-            "error_message": f"yt-dlp xatolik yoki media topilmadi: {e}"
-        }
 
 def is_valid_url(url: str) -> bool:
     """Check if URL is valid"""

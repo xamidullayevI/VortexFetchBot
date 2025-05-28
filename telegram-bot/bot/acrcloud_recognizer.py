@@ -10,6 +10,7 @@ from typing import Dict, Optional, Any
 from pathlib import Path
 
 from .utils import run_command
+from .path_utils import generate_temp_filename
 from .services.monitoring import metrics
 from .config.config import config
 

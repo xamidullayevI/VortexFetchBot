@@ -5,7 +5,7 @@ from typing import Optional, Tuple, Dict, Any
 from pathlib import Path
 import yt_dlp
 from .services.monitoring import metrics
-from .utils import generate_temp_filename
+from .path_utils import generate_temp_filename
 from .config.config import config
 
 logger = logging.getLogger(__name__)

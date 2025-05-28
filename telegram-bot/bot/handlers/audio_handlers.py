@@ -4,7 +4,8 @@ from typing import Dict, Any
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from ..acrcloud_recognizer import extract_audio_from_video, get_music_info
-from ..utils import ensure_downloads_dir, cleanup_file, generate_temp_filename, format_duration
+from ..utils import cleanup_file, format_duration
+from ..path_utils import generate_temp_filename
 from ..services.rate_limiter import RateLimiter
 from ..services.monitoring import metrics
 from ..config.config import config

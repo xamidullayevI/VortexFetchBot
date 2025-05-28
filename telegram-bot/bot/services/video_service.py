@@ -11,7 +11,8 @@ from ..downloader import download_video_with_info, DownloadError
 from ..video_compress import compress_video
 from ..services.monitoring import metrics
 from ..config.config import config
-from ..utils import ensure_downloads_dir, cleanup_file, generate_temp_filename
+from ..utils import ensure_downloads_dir, cleanup_file
+from ..path_utils import generate_temp_filename
 
 logger = logging.getLogger(__name__)
 

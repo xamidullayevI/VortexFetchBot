@@ -3,6 +3,7 @@ from . import handlers
 from . import services
 from . import config
 from . import utils
+from . import path_utils
 from . import acrcloud_recognizer
 from . import video_compress
 from . import downloader
@@ -16,6 +17,7 @@ __all__ = [
     'services',
     'config',
     'utils',
+    'path_utils',
     'acrcloud_recognizer',
     'video_compress',
     'downloader'
