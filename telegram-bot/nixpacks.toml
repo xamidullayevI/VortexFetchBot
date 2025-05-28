@@ -2,14 +2,19 @@
 nixPkgs = [
     "ffmpeg",
     "gcc",
-    "git"
+    "git",
+    "python39",
+    "python39Packages.pip"
 ]
 
 [phases.install]
 cmds = [
-    "python -m pip install --upgrade pip",
+    "python -m pip install --upgrade pip setuptools wheel",
     "python -m pip install -r requirements.txt --no-cache-dir"
 ]
 
 [start]
 cmd = "python main.py"
+
+[build]
+builder = "nixpacks"
