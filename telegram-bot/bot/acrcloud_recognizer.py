@@ -8,7 +8,6 @@ import asyncio
 import aiohttp
 from typing import Dict, Optional, Any
 from pathlib import Path
-from acrcloud.recognizer import ACRCloudRecognizer
 
 from .utils import run_command
 from .services.monitoring import metrics
@@ -56,7 +55,7 @@ async def extract_audio_from_video(video_path: str, output_path: Optional[str] =
 
 async def get_music_info(audio_file: str) -> Optional[Dict[str, Any]]:
     """
-    Recognize music using ACRCloud SDK
+    Recognize music using ACRCloud HTTP API
     Returns dict with music info or None if not found/error
     """
     try:
@@ -69,50 +68,75 @@ async def get_music_info(audio_file: str) -> Optional[Dict[str, Any]]:
             logger.error("ACRCloud credentials not configured")
             return None
 
-        # Initialize ACRCloud recognizer
-        config = {
-            'host': host,
-            'access_key': access_key,
-            'access_secret': access_secret,
-            'debug': False,
-            'timeout': 10  # seconds
-        }
-        
-        recognizer = ACRCloudRecognizer(config)
+        http_method = "POST"
+        http_uri = "/v1/identify"
+        data_type = "audio"
+        signature_version = "1"
+        timestamp = str(int(time.time()))
 
-        # Read audio file in chunks to avoid memory issues
-        max_size = 10 * 1024 * 1024  # 10MB max for recognition
+        string_to_sign = "\n".join([
+            http_method,
+            http_uri,
+            access_key,
+            data_type,
+            signature_version,
+            timestamp
+        ])
+
+        sign = base64.b64encode(
+            hmac.new(
+                access_secret.encode('ascii'),
+                string_to_sign.encode('ascii'),
+                digestmod=hashlib.sha1
+            ).digest()
+        ).decode('ascii')
+
+        # Read audio file
         with open(audio_file, 'rb') as f:
-            audio_bytes = f.read(max_size)
+            sample_bytes = f.read(10 * 1024 * 1024)  # Read up to 10MB
 
-        # Run recognition
-        result = recognizer.recognize_by_file(audio_file, 0)
-        result = eval(result) if isinstance(result, str) else result
+        # Prepare form data
+        data = aiohttp.FormData()
+        data.add_field('access_key', access_key)
+        data.add_field('data_type', data_type)
+        data.add_field('signature', sign)
+        data.add_field('signature_version', signature_version)
+        data.add_field('timestamp', timestamp)
+        data.add_field('sample', sample_bytes, filename='sample.mp3')
 
-        if (result.get('status', {}).get('code') == 0 and
-            'metadata' in result and
-            'music' in result['metadata'] and
-            result['metadata']['music']):
-            
-            music = result['metadata']['music'][0]
-            
-            # Format response
-            response_data = {
-                'title': music.get('title', 'Unknown'),
-                'artist': music.get('artists', [{'name': 'Unknown'}])[0]['name'],
-                'album': music.get('album', {}).get('name', 'Unknown'),
-                'release_date': music.get('release_date', 'Unknown'),
-                'score': music.get('score', 0),
-                'external_metadata': music.get('external_metadata', {})
-            }
+        async with aiohttp.ClientSession() as session:
+            url = f'https://{host}{http_uri}'
+            async with session.post(url, data=data, timeout=30) as response:
+                if response.status != 200:
+                    logger.error(f"ACRCloud API error: {response.status}")
+                    return None
 
-            # Add duration if available
-            duration = music.get('duration_ms')
-            if duration:
-                response_data['duration'] = duration / 1000  # Convert to seconds
+                result = await response.json()
 
-            metrics.track_successful_music_recognition()
-            return response_data
+                if (result.get('status', {}).get('code') == 0 and
+                    'metadata' in result and
+                    'music' in result['metadata'] and
+                    result['metadata']['music']):
+                    
+                    music = result['metadata']['music'][0]
+                    
+                    # Format response
+                    response_data = {
+                        'title': music.get('title', 'Unknown'),
+                        'artist': music.get('artists', [{'name': 'Unknown'}])[0]['name'],
+                        'album': music.get('album', {}).get('name', 'Unknown'),
+                        'release_date': music.get('release_date', 'Unknown'),
+                        'score': music.get('score', 0),
+                        'external_metadata': music.get('external_metadata', {})
+                    }
+
+                    # Add duration if available
+                    duration = music.get('duration_ms')
+                    if duration:
+                        response_data['duration'] = duration / 1000  # Convert to seconds
+
+                    metrics.track_successful_music_recognition()
+                    return response_data
 
         return None
 

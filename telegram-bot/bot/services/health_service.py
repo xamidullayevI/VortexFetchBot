@@ -12,9 +12,10 @@ logger = logging.getLogger(__name__)
 
 class HealthService:
     def __init__(self, port: int = None):
-        self.port = port or config.port
+        self.port = port or int(os.getenv('PORT', config.port))
         self.start_time = datetime.now()
         self._app = web.Application()
+        self._app.router.add_get("/", self.root_handler)  # Add root handler for Railway
         self._app.router.add_get("/health", self.health_check)
         self._app.router.add_get("/metrics", self.metrics_endpoint)
         self._runner: Optional[web.AppRunner] = None
@@ -47,6 +48,10 @@ class HealthService:
         except Exception as e:
             logger.error(f"Error stopping health check service: {e}")
             metrics.track_error(type(e).__name__)
+
+    async def root_handler(self, request: web.Request) -> web.Response:
+        """Handle root endpoint for Railway"""
+        return web.Response(text="Bot is running", content_type="text/plain")
 
     async def health_check(self, request: web.Request) -> web.Response:
         """Handle /health endpoint"""
@@ -109,19 +114,19 @@ class HealthService:
             
             # Add download metrics
             prometheus_metrics.extend([
-                f'# TYPE bot_downloads_total counter',
+                '# TYPE bot_downloads_total counter',
                 f'bot_downloads_total {bot_stats["total_downloads"]}',
-                f'# TYPE bot_downloads_success counter',
+                '# TYPE bot_downloads_success counter',
                 f'bot_downloads_success {bot_stats["successful_downloads"]}',
-                f'# TYPE bot_downloads_errors counter',
+                '# TYPE bot_downloads_errors counter',
                 f'bot_downloads_errors {bot_stats["total_errors"]}'
             ])
             
             # Add audio processing metrics
             prometheus_metrics.extend([
-                f'# TYPE bot_audio_extractions counter',
+                '# TYPE bot_audio_extractions counter',
                 f'bot_audio_extractions {bot_stats["audio_extractions"]}',
-                f'# TYPE bot_music_recognitions counter',
+                '# TYPE bot_music_recognitions counter',
                 f'bot_music_recognitions {bot_stats["music_recognitions"]}'
             ])
             
@@ -129,11 +134,11 @@ class HealthService:
             system_stats = bot_stats.get("system", {})
             if system_stats:
                 prometheus_metrics.extend([
-                    f'# TYPE bot_cpu_percent gauge',
+                    '# TYPE bot_cpu_percent gauge',
                     f'bot_cpu_percent {system_stats.get("cpu_percent", 0)}',
-                    f'# TYPE bot_memory_percent gauge',
+                    '# TYPE bot_memory_percent gauge',
                     f'bot_memory_percent {system_stats.get("memory_percent", 0)}',
-                    f'# TYPE bot_disk_percent gauge',
+                    '# TYPE bot_disk_percent gauge',
                     f'bot_disk_percent {system_stats.get("disk_percent", 0)}'
                 ])
             

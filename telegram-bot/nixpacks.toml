@@ -2,9 +2,10 @@
 nixPkgs = [
     "ffmpeg",
     "gcc",
-    "git",
+    "pkg-config",
     "python39",
-    "python39Packages.pip"
+    "python39Packages.pip",
+    "python39Packages.wheel"
 ]
 
 [phases.install]
